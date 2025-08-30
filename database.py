@@ -1,5 +1,6 @@
 import asyncpg
 import os
+import ssl
 from dotenv import load_dotenv
 from datetime import date
 
@@ -10,8 +11,16 @@ db_pool = None
 # === Databasega ulanish ===
 async def init_db():
     global db_pool
+    DATABASE_URL = os.getenv("DATABASE_URL")
+
+    # sslmode=require ni asyncpg to‘g‘ri tushunishi uchun
+    ssl_ctx = ssl.create_default_context()
+
     db_pool = await asyncpg.create_pool(
-        dsn=os.getenv("DATABASE_URL")  # faqat URL orqali ulanish
+        dsn=DATABASE_URL.split("?")[0],  # ?sslmode=require qismini olib tashlaymiz
+        ssl=ssl_ctx,
+        command_timeout=60,
+        timeout=60
     )
 
     async with db_pool.acquire() as conn:
