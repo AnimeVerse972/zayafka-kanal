@@ -35,8 +35,9 @@ keep_alive()
 
 API_TOKEN = os.getenv("API_TOKEN")
 CHANNELS = [-1002619723869]
-LINKS = ["https://t.me/+0UbS-5Z-b-FlY2Uy"]
+LINKS = ["https://t.me/+-7Su2_mfb6QxNjdi"]
 MAIN_CHANNELS = []
+MAIN_LINKS = []
 BOT_USERNAME = os.getenv("BOT_USERNAME")
 
 bot = Bot(token=API_TOKEN)
@@ -90,9 +91,10 @@ class PostStates(StatesGroup):
     waiting_for_image = State()
     waiting_for_title = State()
     waiting_for_link = State()
-
+    
 class KanalStates(StatesGroup):
-    waiting_for_channel = State()
+    waiting_for_channel_id = State()
+    waiting_for_channel_link = State()
 
 
 # === OBUNA TEKSHIRISH ===
@@ -318,7 +320,32 @@ async def channel_actions(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@dp.message_handler(state=KanalStates.waiting_for_channel, user_id=ADMINS)
+@dp.callback_query_handler(lambda c: c.data == "action:add", user_id=ADMINS)
+async def add_channel_start(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    ctype = data.get("channel_type")
+
+    await KanalStates.waiting_for_channel_id.set()
+    await callback.message.answer("🆔 Kanal ID yuboring (masalan: -1001234567890):", reply_markup=control_keyboard())
+    await state.update_data(channel_type=ctype)
+    await callback.answer()
+
+
+# === 1. Kanal ID qabul qilish ===
+@dp.message_handler(state=KanalStates.waiting_for_channel_id, user_id=ADMINS)
+async def add_channel_id(message: types.Message, state: FSMContext):
+    try:
+        channel_id = int(message.text.strip())
+        await state.update_data(channel_id=channel_id)
+        await KanalStates.waiting_for_channel_link.set()
+        await message.answer("🔗 Endi kanal linkini yuboring (masalan: https://t.me/+invitehash):",
+                             reply_markup=control_keyboard())
+    except ValueError:
+        await message.answer("❗ Faqat sonlardan iborat ID yuboring (masalan: -1001234567890).")
+
+
+# === 2. Kanal linkini qabul qilish va saqlash ===
+@dp.message_handler(state=KanalStates.waiting_for_channel_link, user_id=ADMINS)
 async def add_channel_finish(message: types.Message, state: FSMContext):
     if message.text == "📡 Boshqarish":
         await state.finish()
@@ -327,50 +354,41 @@ async def add_channel_finish(message: types.Message, state: FSMContext):
 
     data = await state.get_data()
     ctype = data.get("channel_type")
+    channel_id = data.get("channel_id")
+    channel_link = message.text.strip()
+
+    if not channel_link.startswith("http"):
+        await message.answer("❗ To‘liq link yuboring (masalan: https://t.me/...)", reply_markup=control_keyboard())
+        return
+
+    try:
+        chat = await bot.get_chat(channel_id)
+        channel_title = chat.title
+    except Exception:
+        channel_title = "Noma'lum kanal"
 
     if ctype == "sub":
-        try:
-            # 1️⃣ Kanal linkini so‘raymiz (username yoki https://t.me/...)
-            channel_link = message.text.strip()
-
-            # link yoki @ bilan boshlangan bo‘lishi kerak
-            if not (channel_link.startswith("@") or "t.me" in channel_link):
-                await message.answer("❗ Iltimos, kanal linkini yuboring (masalan: @mychannel yoki https://t.me/mychannel).",
-                                     reply_markup=control_keyboard())
-                return
-
-            # 2️⃣ Kanal haqida info olamiz
-            chat = await bot.get_chat(channel_link)
-            channel_id = chat.id
-
-            # 3️⃣ Dublikat bor-yo‘qligini tekshiramiz
-            if channel_id in CHANNELS:
-                await message.answer("ℹ️ Bu kanal allaqachon ro‘yxatda bor.", reply_markup=control_keyboard())
-            else:
-                # 4️⃣ CHANNELS ga ID, LINKS ga linkni qo‘shamiz
-                CHANNELS.append(channel_id)
-
-                # link agar @ bo‘lsa → avtomatik https://t.me/... ga aylantiramiz
-                if channel_link.startswith("@"):
-                    channel_link = f"https://t.me/{channel_link[1:]}"
-
-                LINKS.append(channel_link)
-
-                await message.answer(
-                    f"✅ {chat.title} qo‘shildi!\n\n🆔 ID: `{channel_id}`\n🔗 Link: {channel_link}",
-                    parse_mode="Markdown",
-                    reply_markup=control_keyboard()
-                )
-        except Exception as e:
-            await message.answer(f"❗ Kanalni qo‘shib bo‘lmadi: {e}", reply_markup=control_keyboard())
-
-    else:  # MAIN_CHANNELS uchun oddiy qo‘shamiz
-        channel = message.text.strip()
-        if channel in MAIN_CHANNELS:
+        if channel_id in CHANNELS:
             await message.answer("ℹ️ Bu kanal allaqachon ro‘yxatda bor.", reply_markup=control_keyboard())
         else:
-            MAIN_CHANNELS.append(channel)
-            await message.answer(f"✅ {channel} qo‘shildi (asosiy kanal).", reply_markup=control_keyboard())
+            CHANNELS.append(channel_id)
+            LINKS.append(channel_link)
+            await message.answer(
+                f"✅ {channel_title} qo‘shildi!\n\n🆔 ID: `{channel_id}`\n🔗 Link: {channel_link}",
+                parse_mode="Markdown",
+                reply_markup=control_keyboard()
+            )
+    else:
+        if channel_id in MAIN_CHANNELS:
+            await message.answer("ℹ️ Bu kanal allaqachon ro‘yxatda bor.", reply_markup=control_keyboard())
+        else:
+            MAIN_CHANNELS.append(channel_id)
+            MAIN_LINKS.append(channel_link)
+            await message.answer(
+                f"✅ {channel_title} qo‘shildi (asosiy kanal)!\n\n🆔 ID: `{channel_id}`\n🔗 Link: {channel_link}",
+                parse_mode="Markdown",
+                reply_markup=control_keyboard()
+            )
 
     await state.finish()
 
