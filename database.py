@@ -11,16 +11,14 @@ db_pool = None
 # === Databasega ulanish ===
 async def init_db():
     global db_pool
-    DATABASE_URL = os.getenv("DATABASE_URL")
 
-    # sslmode=require ni asyncpg to‘g‘ri tushunishi uchun
-    ssl_ctx = ssl.create_default_context()
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE   # sertifikatni tekshirmaydi
 
     db_pool = await asyncpg.create_pool(
-        dsn=DATABASE_URL.split("?")[0],  # ?sslmode=require qismini olib tashlaymiz
-        ssl=ssl_ctx,
-        command_timeout=60,
-        timeout=60
+        dsn=os.getenv("DATABASE_URL"),
+        ssl=ssl_context
     )
 
     async with db_pool.acquire() as conn:
@@ -59,13 +57,14 @@ async def init_db():
             );
         """)
 
-        # Dastlabki adminlar (o‘zingning ID’laringni yoz)
-        default_admins = [6486825926, 6549594161]
+        # Dastlabki adminlar
+        default_admins = [6486825926]
         for admin_id in default_admins:
             await conn.execute(
                 "INSERT INTO admins (user_id) VALUES ($1) ON CONFLICT DO NOTHING",
                 admin_id
             )
+
 
 
 # === Foydalanuvchilar bilan ishlash ===
