@@ -1,6 +1,5 @@
 import asyncpg
 import os
-import ssl
 from dotenv import load_dotenv
 from datetime import date
 
@@ -11,15 +10,9 @@ db_pool = None
 # === Databasega ulanish ===
 async def init_db():
     global db_pool
-
-    ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE   # sertifikatni tekshirmaydi
-
     db_pool = await asyncpg.create_pool(
-        dsn=os.getenv("DATABASE_URL"),
-        ssl=ssl_context,
-        statement_cache_size=0  # 🔑 PgBouncer bilan moslash uchun
+        dsn=os.getenv("DATABASE_URL"),  # faqat URL orqali ulanish
+        statement_cache_size=0
     )
 
     async with db_pool.acquire() as conn:
@@ -58,7 +51,7 @@ async def init_db():
             );
         """)
 
-        # Dastlabki adminlar
+        # Dastlabki adminlar (o‘zingning ID’laringni yoz)
         default_admins = [6486825926]
         for admin_id in default_admins:
             await conn.execute(
@@ -66,13 +59,19 @@ async def init_db():
                 admin_id
             )
 
+
 # === Foydalanuvchilar bilan ishlash ===
 async def add_user(user_id):
     async with db_pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", user_id
         )
-
+async def get_conn():
+    global db_pool
+    if db_pool is None:
+        await init_db()
+    return db_pool
+    
 async def get_user_count():
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT COUNT(*) FROM users")
@@ -85,6 +84,7 @@ async def get_today_users():
             SELECT COUNT(*) FROM users WHERE DATE(created_at) = $1
         """, today)
         return row[0] if row else 0
+
 
 # === Kodlar bilan ishlash ===
 async def add_kino_code(code, channel, message_id, post_count, title):
@@ -135,6 +135,7 @@ async def delete_kino_code(code):
         result = await conn.execute("DELETE FROM kino_codes WHERE code = $1", code)
         return result.endswith("1")
 
+
 # === Statistika bilan ishlash ===
 async def increment_stat(code, field):
     if field not in ("searched", "viewed", "init"):
@@ -154,12 +155,14 @@ async def get_code_stat(code):
     async with db_pool.acquire() as conn:
         return await conn.fetchrow("SELECT searched, viewed FROM stats WHERE code = $1", code)
 
+
 # === Kodni yangilash ===
 async def update_anime_code(old_code, new_code, new_title):
     async with db_pool.acquire() as conn:
         await conn.execute("""
             UPDATE kino_codes SET code = $1, title = $2 WHERE code = $3
         """, new_code, new_title, old_code)
+
 
 # === Adminlar bilan ishlash ===
 async def get_all_admins():
@@ -177,6 +180,7 @@ async def add_admin(user_id: int):
 async def remove_admin(user_id: int):
     async with db_pool.acquire() as conn:
         await conn.execute("DELETE FROM admins WHERE user_id = $1", user_id)
+
 
 # === Barcha foydalanuvchilarni olish ===
 async def get_all_user_ids():
