@@ -18,7 +18,8 @@ async def init_db():
 
     db_pool = await asyncpg.create_pool(
         dsn=os.getenv("DATABASE_URL"),
-        ssl=ssl_context
+        ssl=ssl_context,
+        statement_cache_size=0  # 🔑 PgBouncer bilan moslash uchun
     )
 
     async with db_pool.acquire() as conn:
@@ -65,8 +66,6 @@ async def init_db():
                 admin_id
             )
 
-
-
 # === Foydalanuvchilar bilan ishlash ===
 async def add_user(user_id):
     async with db_pool.acquire() as conn:
@@ -86,7 +85,6 @@ async def get_today_users():
             SELECT COUNT(*) FROM users WHERE DATE(created_at) = $1
         """, today)
         return row[0] if row else 0
-
 
 # === Kodlar bilan ishlash ===
 async def add_kino_code(code, channel, message_id, post_count, title):
@@ -137,7 +135,6 @@ async def delete_kino_code(code):
         result = await conn.execute("DELETE FROM kino_codes WHERE code = $1", code)
         return result.endswith("1")
 
-
 # === Statistika bilan ishlash ===
 async def increment_stat(code, field):
     if field not in ("searched", "viewed", "init"):
@@ -157,14 +154,12 @@ async def get_code_stat(code):
     async with db_pool.acquire() as conn:
         return await conn.fetchrow("SELECT searched, viewed FROM stats WHERE code = $1", code)
 
-
 # === Kodni yangilash ===
 async def update_anime_code(old_code, new_code, new_title):
     async with db_pool.acquire() as conn:
         await conn.execute("""
             UPDATE kino_codes SET code = $1, title = $2 WHERE code = $3
         """, new_code, new_title, old_code)
-
 
 # === Adminlar bilan ishlash ===
 async def get_all_admins():
@@ -182,7 +177,6 @@ async def add_admin(user_id: int):
 async def remove_admin(user_id: int):
     async with db_pool.acquire() as conn:
         await conn.execute("DELETE FROM admins WHERE user_id = $1", user_id)
-
 
 # === Barcha foydalanuvchilarni olish ===
 async def get_all_user_ids():
