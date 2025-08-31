@@ -248,7 +248,7 @@ async def forward_to_admins(message: types.Message, state: FSMContext):
     await message.answer("✅ Xabaringiz yuborildi. Tez orada admin siz bilan bog‘lanadi.")
 
 
-# === Kanal boshqaruvi ===
+# === Kanal boshqaruvi menyusi ===
 @dp.message_handler(lambda m: m.text == "📡 Kanal boshqaruvi", user_id=ADMINS)
 async def kanal_boshqaruvi(message: types.Message):
     kb = InlineKeyboardMarkup()
@@ -259,10 +259,12 @@ async def kanal_boshqaruvi(message: types.Message):
     await message.answer("📡 Qaysi kanal turini boshqarasiz?", reply_markup=kb)
 
 
+# === Kanal turi tanlanadi ===
 @dp.callback_query_handler(lambda c: c.data.startswith("channel_type:"), user_id=ADMINS)
 async def select_channel_type(callback: types.CallbackQuery, state: FSMContext):
     ctype = callback.data.split(":")[1]
     await state.update_data(channel_type=ctype)
+
     kb = InlineKeyboardMarkup()
     kb.add(
         InlineKeyboardButton("➕ Kanal qo‘shish", callback_data="action:add"),
@@ -272,62 +274,64 @@ async def select_channel_type(callback: types.CallbackQuery, state: FSMContext):
         InlineKeyboardButton("❌ Kanal o‘chirish", callback_data="action:delete"),
         InlineKeyboardButton("⬅️ Orqaga", callback_data="action:back")
     )
+
     text = "📡 Majburiy obuna kanallari menyusi:" if ctype == "sub" else "📌 Asosiy kanallar menyusi:"
     await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer()
 
 
+# === Actionlarni boshqarish ===
 @dp.callback_query_handler(lambda c: c.data.startswith("action:"), user_id=ADMINS)
 async def channel_actions(callback: types.CallbackQuery, state: FSMContext):
     action = callback.data.split(":")[1]
     data = await state.get_data()
     ctype = data.get("channel_type")
+
     if not ctype:
         await callback.answer("❗ Avval kanal turini tanlang.")
         return
 
     if action == "add":
-        await KanalStates.waiting_for_channel.set()
-        await callback.message.answer("📎 Kanal username yuboring (masalan: @mychannel):", reply_markup=control_keyboard())
+        await KanalStates.waiting_for_channel_id.set()
+        await callback.message.answer("🆔 Kanal ID yuboring (masalan: -1001234567890):")
 
     elif action == "list":
-        channels = CHANNELS if ctype == "sub" else MAIN_CHANNELS
-        if not channels:
-            await callback.message.answer("📭 Hech qanday kanal yo‘q.")
+        if ctype == "sub":
+            channels = zip(CHANNELS, LINKS)
+            title = "📋 Majburiy obuna kanallari:\n\n"
         else:
-            text = "📋 Majburiy obuna kanallari:\n\n" if ctype == "sub" else "📌 Asosiy kanallar:\n\n"
-            text += "\n".join(f"{i}. {ch}" for i, ch in enumerate(channels, 1))
+            channels = zip(MAIN_CHANNELS, MAIN_LINKS)
+            title = "📌 Asosiy kanallar:\n\n"
+
+        if not list(channels):
+            await callback.message.answer("📭 Hali kanal yo‘q.")
+        else:
+            text = title + "\n".join(
+                f"{i}. 🆔 {cid}\n   🔗 {link}" for i, (cid, link) in enumerate(channels, 1)
+            )
             await callback.message.answer(text)
 
     elif action == "delete":
-        channels = CHANNELS if ctype == "sub" else MAIN_CHANNELS
+        if ctype == "sub":
+            channels = zip(CHANNELS, LINKS)
+            prefix = "del_sub"
+        else:
+            channels = zip(MAIN_CHANNELS, MAIN_LINKS)
+            prefix = "del_main"
+
+        channels = list(channels)
         if not channels:
-            await callback.message.answer("📭 Hech qanday kanal yo‘q.")
+            await callback.message.answer("📭 Hali kanal yo‘q.")
             return
+
         kb = InlineKeyboardMarkup()
-        for ch in channels:
-            data = "delch" if ctype == "sub" else "delmain"
-            kb.add(InlineKeyboardButton(f"O‘chirish: {ch}", callback_data=f"{data}:{ch}"))
+        for cid, link in channels:
+            kb.add(InlineKeyboardButton(f"O‘chirish: {cid}", callback_data=f"{prefix}:{cid}"))
         await callback.message.answer("❌ Qaysi kanalni o‘chirmoqchisiz?", reply_markup=kb)
 
     elif action == "back":
-        kb = InlineKeyboardMarkup()
-        kb.add(
-            InlineKeyboardButton("🔗 Majburiy obuna", callback_data="channel_type:sub"),
-            InlineKeyboardButton("📌 Asosiy kanallar", callback_data="channel_type:main")
-        )
-        await callback.message.edit_text("📡 Qaysi kanal turini boshqarasiz?", reply_markup=kb)
-    await callback.answer()
+        await kanal_boshqaruvi(callback.message)
 
-
-@dp.callback_query_handler(lambda c: c.data == "action:add", user_id=ADMINS)
-async def add_channel_start(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    ctype = data.get("channel_type")
-
-    await KanalStates.waiting_for_channel_id.set()
-    await callback.message.answer("🆔 Kanal ID yuboring (masalan: -1001234567890):", reply_markup=control_keyboard())
-    await state.update_data(channel_type=ctype)
     await callback.answer()
 
 
@@ -338,8 +342,7 @@ async def add_channel_id(message: types.Message, state: FSMContext):
         channel_id = int(message.text.strip())
         await state.update_data(channel_id=channel_id)
         await KanalStates.waiting_for_channel_link.set()
-        await message.answer("🔗 Endi kanal linkini yuboring (masalan: https://t.me/+invitehash):",
-                             reply_markup=control_keyboard())
+        await message.answer("🔗 Endi kanal linkini yuboring (masalan: https://t.me/+invitehash):")
     except ValueError:
         await message.answer("❗ Faqat sonlardan iborat ID yuboring (masalan: -1001234567890).")
 
@@ -347,52 +350,54 @@ async def add_channel_id(message: types.Message, state: FSMContext):
 # === 2. Kanal linkini qabul qilish va saqlash ===
 @dp.message_handler(state=KanalStates.waiting_for_channel_link, user_id=ADMINS)
 async def add_channel_finish(message: types.Message, state: FSMContext):
-    if message.text == "📡 Boshqarish":
-        await state.finish()
-        await send_admin_panel(message)
-        return
-
     data = await state.get_data()
     ctype = data.get("channel_type")
     channel_id = data.get("channel_id")
     channel_link = message.text.strip()
 
     if not channel_link.startswith("http"):
-        await message.answer("❗ To‘liq link yuboring (masalan: https://t.me/...)", reply_markup=control_keyboard())
+        await message.answer("❗ To‘liq link yuboring (masalan: https://t.me/...)")
         return
-
-    try:
-        chat = await bot.get_chat(channel_id)
-        channel_title = chat.title
-    except Exception:
-        channel_title = "Noma'lum kanal"
 
     if ctype == "sub":
         if channel_id in CHANNELS:
-            await message.answer("ℹ️ Bu kanal allaqachon ro‘yxatda bor.", reply_markup=control_keyboard())
+            await message.answer("ℹ️ Bu kanal allaqachon qo‘shilgan.")
         else:
             CHANNELS.append(channel_id)
             LINKS.append(channel_link)
-            await message.answer(
-                f"✅ {channel_title} qo‘shildi!\n\n🆔 ID: `{channel_id}`\n🔗 Link: {channel_link}",
-                parse_mode="Markdown",
-                reply_markup=control_keyboard()
-            )
+            await message.answer(f"✅ Kanal qo‘shildi!\n🆔 {channel_id}\n🔗 {channel_link}")
     else:
         if channel_id in MAIN_CHANNELS:
-            await message.answer("ℹ️ Bu kanal allaqachon ro‘yxatda bor.", reply_markup=control_keyboard())
+            await message.answer("ℹ️ Bu kanal allaqachon qo‘shilgan.")
         else:
             MAIN_CHANNELS.append(channel_id)
             MAIN_LINKS.append(channel_link)
-            await message.answer(
-                f"✅ {channel_title} qo‘shildi (asosiy kanal)!\n\n🆔 ID: `{channel_id}`\n🔗 Link: {channel_link}",
-                parse_mode="Markdown",
-                reply_markup=control_keyboard()
-            )
+            await message.answer(f"✅ Asosiy kanal qo‘shildi!\n🆔 {channel_id}\n🔗 {channel_link}")
 
     await state.finish()
 
 
+# === Kanalni o‘chirish ===
+@dp.callback_query_handler(lambda c: c.data.startswith("del_"), user_id=ADMINS)
+async def delete_channel(callback: types.CallbackQuery):
+    action, cid = callback.data.split(":")
+    cid = int(cid)
+
+    if action == "del_sub":
+        if cid in CHANNELS:
+            idx = CHANNELS.index(cid)
+            CHANNELS.pop(idx)
+            LINKS.pop(idx)
+            await callback.message.answer(f"❌ Kanal o‘chirildi!\n🆔 {cid}")
+    elif action == "del_main":
+        if cid in MAIN_CHANNELS:
+            idx = MAIN_CHANNELS.index(cid)
+            MAIN_CHANNELS.pop(idx)
+            MAIN_LINKS.pop(idx)
+            await callback.message.answer(f"❌ Asosiy kanal o‘chirildi!\n🆔 {cid}")
+
+    await callback.answer("O‘chirildi ✅")
+    
 # === Admin qo'shish ===
 @dp.message_handler(lambda m: m.text == "➕ Admin qo‘shish", user_id=ADMINS)
 async def add_admin_start(message: types.Message):
