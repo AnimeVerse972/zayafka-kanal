@@ -210,11 +210,15 @@ async def show_all_animes(message: types.Message):
 
 
 
-# === Admin bilan bog‘lanish ===
+# === Admin bilan bog‘lanish (foydalanuvchi qismi) ===
 @dp.message_handler(lambda m: m.text == "✉️ Admin bilan bog‘lanish")
 async def contact_admin(message: types.Message):
     await UserStates.waiting_for_admin_message.set()
-    await message.answer("✍️ Adminlarga yubormoqchi bo‘lgan xabaringizni yozing.\n\n❌ Bekor qilish uchun '❌ Bekor qilish' tugmasini bosing.", reply_markup=control_keyboard())
+    await message.answer(
+        "✍️ Adminlarga yubormoqchi bo‘lgan xabaringizni yozing.\n\n"
+        "❌ Bekor qilish uchun '❌ Bekor qilish' tugmasini bosing.",
+        reply_markup=control_keyboard()
+    )
 
 @dp.message_handler(state=UserStates.waiting_for_admin_message)
 async def forward_to_admins(message: types.Message, state: FSMContext):
@@ -242,6 +246,38 @@ async def forward_to_admins(message: types.Message, state: FSMContext):
             print(f"Adminga yuborishda xatolik: {e}")
     await message.answer("✅ Xabaringiz yuborildi. Tez orada admin siz bilan bog‘lanadi.")
 
+# === Admin "javob yozish" tugmasi bosilganda ===
+@dp.callback_query_handler(lambda c: c.data.startswith("reply_user:"))
+async def admin_start_reply(callback: types.CallbackQuery, state: FSMContext):
+    user_id = int(callback.data.split(":")[1])
+    await state.update_data(reply_to_user_id=user_id)
+    await AdminReplyStates.waiting_for_reply_message.set()
+    await callback.message.answer("✍️ Javob matnini yozing:", reply_markup=ReplyKeyboardRemove())
+    await callback.answer()  # tugma loadingini yopish
+
+# === Admin javobini qabul qilish va foydalanuvchiga yuborish ===
+@dp.message_handler(state=AdminReplyStates.waiting_for_reply_message, content_types=types.ContentTypes.TEXT)
+async def process_admin_reply(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    user_id = data.get("reply_to_user_id")
+
+    if not user_id:
+        await message.answer("❌ Foydalanuvchi ID topilmadi. Avval foydalanuvchi xabariga javob yozish kerak.")
+        await state.finish()
+        return
+
+    try:
+        await bot.send_message(
+            chat_id=user_id,
+            text=f"✉️ <b>Admin sizga javob berdi:</b>\n\n{message.text}",
+            parse_mode="HTML"
+        )
+        await message.answer("✅ Javob foydalanuvchiga yuborildi.")
+    except Exception as e:
+        await message.answer(f"❌ Javob yuborishda xatolik: {e}")
+
+    await state.finish()
+    
 # === Kanal boshqaruvi menyusi ===
 @dp.message_handler(lambda m: m.text == "📡 Kanal boshqaruvi", user_id=ADMINS)
 async def kanal_boshqaruvi(message: types.Message):
@@ -770,7 +806,6 @@ async def send_forward_only(message: types.Message, state: FSMContext):
         await send_admin_panel(message)
         return
 
-    await state.finish()
     parts = message.text.strip().split()
     if len(parts) != 2:
         await message.answer("❗ Format noto‘g‘ri. Masalan: `@kanalim 123`", reply_markup=control_keyboard())
@@ -797,6 +832,9 @@ async def send_forward_only(message: types.Message, state: FSMContext):
         # Har 25 ta yuborilganda 1 sekund kutish
         if index % 25 == 0:
             await asyncio.sleep(1)
+
+    # Shu yerda state tugatiladi
+    await state.finish()
 
     await message.answer(
         f"✅ Yuborildi: {success} ta\n❌ Xatolik: {fail} ta",
