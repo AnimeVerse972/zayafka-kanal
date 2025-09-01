@@ -242,7 +242,6 @@ async def forward_to_admins(message: types.Message, state: FSMContext):
             print(f"Adminga yuborishda xatolik: {e}")
     await message.answer("✅ Xabaringiz yuborildi. Tez orada admin siz bilan bog‘lanadi.")
 
-
 # === Kanal boshqaruvi menyusi ===
 @dp.message_handler(lambda m: m.text == "📡 Kanal boshqaruvi", user_id=ADMINS)
 async def kanal_boshqaruvi(message: types.Message):
@@ -286,35 +285,37 @@ async def channel_actions(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("❗ Avval kanal turini tanlang.")
         return
 
+    # ➕ Kanal qo‘shish
     if action == "add":
         await KanalStates.waiting_for_channel_id.set()
         await callback.message.answer("🆔 Kanal ID yuboring (masalan: -1001234567890):")
 
+    # 📋 Kanal ro‘yxati
     elif action == "list":
         if ctype == "sub":
-            channels = list(zip(CHANNELS, LINKS))  # ✅ zip ni list ga aylantiramiz
+            channels = list(zip(CHANNELS, LINKS))
             title = "📋 Majburiy obuna kanallari:\n\n"
         else:
-            channels = list(zip(MAIN_CHANNELS, MAIN_LINKS))  # ✅
+            channels = list(zip(MAIN_CHANNELS, MAIN_LINKS))
             title = "📌 Asosiy kanallar:\n\n"
 
-    if not channels:
-        await callback.message.answer("📭 Hali kanal yo‘q.")
-    else:
-        text = title + "\n".join(
-            f"{i}. 🆔 {cid}\n   🔗 {link}" for i, (cid, link) in enumerate(channels, 1)
-        )
-        await callback.message.answer(text)
-        
+        if not channels:
+            await callback.message.answer("📭 Hali kanal yo‘q.")
+        else:
+            text = title + "\n".join(
+                f"{i}. 🆔 {cid}\n   🔗 {link}" for i, (cid, link) in enumerate(channels, 1)
+            )
+            await callback.message.answer(text)
+
+    # ❌ Kanal o‘chirish
     elif action == "delete":
         if ctype == "sub":
-            channels = zip(CHANNELS, LINKS)
+            channels = list(zip(CHANNELS, LINKS))
             prefix = "del_sub"
         else:
-            channels = zip(MAIN_CHANNELS, MAIN_LINKS)
+            channels = list(zip(MAIN_CHANNELS, MAIN_LINKS))
             prefix = "del_main"
 
-        channels = list(channels)
         if not channels:
             await callback.message.answer("📭 Hali kanal yo‘q.")
             return
@@ -324,6 +325,7 @@ async def channel_actions(callback: types.CallbackQuery, state: FSMContext):
             kb.add(InlineKeyboardButton(f"O‘chirish: {cid}", callback_data=f"{prefix}:{cid}"))
         await callback.message.answer("❌ Qaysi kanalni o‘chirmoqchisiz?", reply_markup=kb)
 
+    # ⬅️ Orqaga
     elif action == "back":
         await kanal_boshqaruvi(callback.message)
 
@@ -392,7 +394,7 @@ async def delete_channel(callback: types.CallbackQuery):
             await callback.message.answer(f"❌ Asosiy kanal o‘chirildi!\n🆔 {cid}")
 
     await callback.answer("O‘chirildi ✅")
-    
+
 # === Admin qo'shish ===
 @dp.message_handler(lambda m: m.text == "➕ Admin qo‘shish", user_id=ADMINS)
 async def add_admin_start(message: types.Message):
