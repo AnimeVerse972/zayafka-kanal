@@ -291,12 +291,12 @@ async def channel_actions(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.answer("🆔 Kanal ID yuboring (masalan: -1001234567890):")
 
     elif action == "list":
-    if ctype == "sub":
-        channels = list(zip(CHANNELS, LINKS))  # ✅ zip ni list ga aylantiramiz
-        title = "📋 Majburiy obuna kanallari:\n\n"
-    else:
-        channels = list(zip(MAIN_CHANNELS, MAIN_LINKS))  # ✅
-        title = "📌 Asosiy kanallar:\n\n"
+        if ctype == "sub":
+            channels = list(zip(CHANNELS, LINKS))  # ✅ zip ni list ga aylantiramiz
+            title = "📋 Majburiy obuna kanallari:\n\n"
+        else:
+            channels = list(zip(MAIN_CHANNELS, MAIN_LINKS))  # ✅
+            title = "📌 Asosiy kanallar:\n\n"
 
     if not channels:
         await callback.message.answer("📭 Hali kanal yo‘q.")
