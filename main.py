@@ -851,14 +851,17 @@ async def send_forward_only(message: types.Message, state: FSMContext):
 @dp.message_handler(lambda message: message.text.isdigit())
 async def handle_code_message(message: types.Message):
     code = message.text
-    if not await is_user_subscribed(message.from_user.id):
+    unsubscribed = await get_unsubscribed_channels(message.from_user.id)
+    if unsubscribed:
         markup = await make_unsubscribed_markup(message.from_user.id, code)
         await message.answer("❗ Anime olishdan oldin quyidagi kanal(lar)ga obuna bo‘ling:", reply_markup=markup)
-    else:
-        await increment_stat(code, "init")
-        await increment_stat(code, "searched")
-        await send_reklama_post(message.from_user.id, code)
-        await increment_stat(code, "viewed")
+        return
+
+    await increment_stat(code, "init")
+    await increment_stat(code, "searched")
+    await send_reklama_post(message.from_user.id, code)
+    await increment_stat(code, "viewed")
+
 
 
 # === Reklama post yuborish ===
