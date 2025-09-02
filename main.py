@@ -35,8 +35,8 @@ load_dotenv()
 keep_alive()
 
 API_TOKEN = os.getenv("API_TOKEN")
-CHANNELS = [-1002619723869]
-LINKS = ["https://t.me/+-7Su2_mfb6QxNjdi"]
+CHANNELS = []
+LINKS = []
 MAIN_CHANNELS = []
 MAIN_LINKS = []
 BOT_USERNAME = os.getenv("BOT_USERNAME")
@@ -45,7 +45,7 @@ bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
-ADMINS = {6486825926}
+ADMINS = {6486825926, 7575041003}
 
 # === KEYBOARDS ===
 def admin_keyboard():
@@ -835,9 +835,9 @@ async def send_forward_only(message: types.Message, state: FSMContext):
             print(f"Xatolik {user_id} uchun: {e}")
             fail += 1
 
-        # Har 25 ta yuborilganda 1 sekund kutish
-        if index % 25 == 0:
-            await asyncio.sleep(1)
+        # Har 27 ta yuborilganda 1 sekund kutish
+        if index % 27 == 0:
+            await asyncio.sleep(0.2)
 
     # Shu yerda state tugatiladi
     await state.finish()
@@ -863,37 +863,46 @@ async def handle_code_message(message: types.Message):
     await increment_stat(code, "viewed")
 
 
-
 # === Reklama post yuborish ===
 async def send_reklama_post(user_id, code):
     data = await get_kino_by_code(code)
     if not data:
         await bot.send_message(user_id, "❌ Kod topilmadi.")
         return
+
     channel, reklama_id, post_count = data["channel"], data["message_id"], data["post_count"]
-    buttons = [InlineKeyboardButton(str(i), callback_data=f"kino:{code}:{i}") for i in range(1, post_count + 1)]
-    keyboard = InlineKeyboardMarkup(row_width=5).add(*buttons)
+
+    # Endi faqat bitta tugma bo'ladi: "📥 Yuklab olish"
+    keyboard = InlineKeyboardMarkup().add(
+        InlineKeyboardButton("📥 Yuklab olish", callback_data=f"download:{code}")
+    )
+
     try:
         await bot.copy_message(user_id, channel, reklama_id - 1, reply_markup=keyboard)
     except:
         await bot.send_message(user_id, "❌ Reklama postni yuborib bo‘lmadi.")
 
 
-# === Kino tugmasi ===
-@dp.callback_query_handler(lambda c: c.data.startswith("kino:"))
-async def kino_button(callback: types.CallbackQuery):
-    _, code, number = callback.data.split(":")
-    number = int(number)
+# === Yuklab olish tugmasi bosilganda ===
+@dp.callback_query_handler(lambda c: c.data.startswith("download:"))
+async def download_all(callback: types.CallbackQuery):
+    code = callback.data.split(":")[1]
     result = await get_kino_by_code(code)
     if not result:
         await callback.message.answer("❌ Kod topilmadi.")
         return
+
     channel, base_id, post_count = result["channel"], result["message_id"], result["post_count"]
-    if number > post_count:
-        await callback.answer("❌ Bunday post yo‘q!", show_alert=True)
-        return
-    await bot.copy_message(callback.from_user.id, channel, base_id + number - 1)
-    await callback.answer()
+
+    await callback.answer("⏳ Yuklanmoqda, biroz kuting...")
+
+    # Hamma qismlarni ketma-ket yuborish
+    for i in range(post_count):
+        try:
+            await bot.copy_message(callback.from_user.id, channel, base_id + i)
+            await asyncio.sleep(0.5)  # flood control uchun sekin yuborish
+        except:
+            pass
 
 # === START ===
 async def on_startup(dp):
