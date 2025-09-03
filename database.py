@@ -1,4 +1,6 @@
 import os
+import json
+import base64
 import firebase_admin
 from firebase_admin import credentials, db
 from datetime import datetime
@@ -7,11 +9,14 @@ from dotenv import load_dotenv
 # === .env dan ma'lumotlarni yuklash ===
 load_dotenv()
 
-FIREBASE_KEY = os.getenv("FIREBASE_KEY")  # firebase service account key json fayli
+# FIREBASE_KEY — base64 qilib .env ichida saqlangan
+firebase_key_json = base64.b64decode(os.getenv("FIREBASE_KEY")).decode("utf-8")
+firebase_key_dict = json.loads(firebase_key_json)
+
 FIREBASE_URL = os.getenv("FIREBASE_URL")  # firebase database url
 
 # Firebasega ulanish
-cred = credentials.Certificate(FIREBASE_KEY)
+cred = credentials.Certificate(firebase_key_dict)
 firebase_admin.initialize_app(cred, {
     "databaseURL": FIREBASE_URL
 })
