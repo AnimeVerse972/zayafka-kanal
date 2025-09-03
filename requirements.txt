@@ -1,4 +1,5 @@
 aiogram==2.25.1
 python-dotenv
-firebase-admin
-flask   # agar webhook ishlatmoqchi bo‘lsangiz
+tortoise-orm
+asyncpg
+flask
