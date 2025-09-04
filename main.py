@@ -720,15 +720,11 @@ async def stats(message: types.Message):
     kodlar = await get_all_codes()
     foydalanuvchilar = await get_user_count()
 
-    # 📅 Bugun qo'shilgan foydalanuvchilar
-    today_users = await get_today_users()
-
     # 📊 Xabar
     text = (
         f"💡 O'rtacha yuklanish: {ping:.2f} ms\n\n"
         f"👥 Foydalanuvchilar: {foydalanuvchilar} ta\n\n"
         f"📂 Barcha yuklangan animelar: {len(kodlar)} ta\n\n"
-        f"📅 Bugun qo'shilgan foydalanuvchilar: {today_users} ta"
     )
     await message.answer(text)
 
