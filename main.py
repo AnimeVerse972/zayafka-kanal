@@ -35,8 +35,8 @@ load_dotenv()
 keep_alive()
 
 API_TOKEN = os.getenv("API_TOKEN")
-CHANNELS = []
-LINKS = []
+CHANNELS = [-1002619723869]
+LINKS = ["https://t.me/+-7Su2_mfb6QxNjdi"]
 MAIN_CHANNELS = []
 MAIN_LINKS = []
 BOT_USERNAME = os.getenv("BOT_USERNAME")
@@ -45,7 +45,7 @@ bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
-ADMINS = {6486825926, 7575041003}
+ADMINS = {6486825926, 8452935714}
 
 # === KEYBOARDS ===
 def admin_keyboard():
@@ -209,33 +209,15 @@ async def show_all_animes(message: types.Message):
         await message.answer(text, parse_mode="Markdown")
 
 
-# === Admin bilan bog‘lanish (foydalanuvchi qismi) ===
-def cancel_keyboard():
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("❌ Bekor qilish"))
-    return kb
-
 
 # === Admin bilan bog‘lanish (foydalanuvchi qismi) ===
 @dp.message_handler(lambda m: m.text == "✉️ Admin bilan bog‘lanish")
 async def contact_admin(message: types.Message):
     await UserStates.waiting_for_admin_message.set()
-    await message.answer(
-        "✍️ Adminlarga yubormoqchi bo‘lgan xabaringizni yozing.\n\n❌ Bekor qilish tugmasini bosing agar ortga qaytmoqchi bo‘lsangiz.",
-        reply_markup=cancel_keyboard()
-    )
-
+    await message.answer("✍️ Adminlarga yubormoqchi bo‘lgan xabaringizni yozing.\n\n❌ Bekor qilish uchun '❌ Bekor qilish' tugmasini bosing.")
 
 @dp.message_handler(state=UserStates.waiting_for_admin_message)
 async def forward_to_admins(message: types.Message, state: FSMContext):
-    # Bekor qilish tugmasi bosilganda
-    if message.text == "❌ Bekor qilish":
-        await state.finish()
-        kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-        kb.add(KeyboardButton("🎞 Barcha animelar"), KeyboardButton("✉️ Admin bilan bog‘lanish"))
-        await message.answer("🏠 Asosiy menyuga qaytdingiz.", reply_markup=kb)
-        return
-
     await state.finish()
     user = message.from_user
 
@@ -256,12 +238,7 @@ async def forward_to_admins(message: types.Message, state: FSMContext):
         except Exception as e:
             print(f"Adminga yuborishda xatolik: {e}")
 
-    await message.answer(
-        "✅ Xabaringiz yuborildi. Tez orada admin siz bilan bog‘lanadi.",
-        reply_markup=ReplyKeyboardMarkup(resize_keyboard=True, row_width=2).add(
-            KeyboardButton("🎞 Barcha animelar"), KeyboardButton("✉️ Admin bilan bog‘lanish")
-        )
-    )
+    await message.answer("✅ Xabaringiz yuborildi. Tez orada admin siz bilan bog‘lanadi.")
 
 @dp.callback_query_handler(lambda c: c.data.startswith("reply_user:"), user_id=ADMINS)
 async def start_admin_reply(callback: CallbackQuery, state: FSMContext):
@@ -835,9 +812,9 @@ async def send_forward_only(message: types.Message, state: FSMContext):
             print(f"Xatolik {user_id} uchun: {e}")
             fail += 1
 
-        # Har 27 ta yuborilganda 1 sekund kutish
-        if index % 27 == 0:
-            await asyncio.sleep(0.2)
+        # Har 25 ta yuborilganda 1 sekund kutish
+        if index % 25 == 0:
+            await asyncio.sleep(1)
 
     # Shu yerda state tugatiladi
     await state.finish()
