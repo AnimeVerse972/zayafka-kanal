@@ -853,9 +853,9 @@ async def send_reklama_post(user_id, code):
 
     channel, reklama_id, post_count = data["channel"], data["message_id"], data["post_count"]
 
-    # Endi faqat bitta tugma bo'ladi: "📥 Yuklab olish"
+    # Endi faqat bitta tugma bo'ladi: "✨Yuklab olish"
     keyboard = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("📥 Yuklab olish", callback_data=f"download:{code}")
+        InlineKeyboardButton("✨ Yuklab olish", callback_data=f"download:{code}")
     )
 
     try:
