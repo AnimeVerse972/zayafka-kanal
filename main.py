@@ -35,8 +35,8 @@ load_dotenv()
 keep_alive()
 
 API_TOKEN = os.getenv("API_TOKEN")
-CHANNELS = []
-LINKS = []
+CHANNELS = [-1002576882467]
+LINKS = ["https://t.me/AniVerseUzDub"]
 MAIN_CHANNELS = []
 MAIN_LINKS = []
 BOT_USERNAME = os.getenv("BOT_USERNAME")
@@ -706,12 +706,24 @@ async def show_all_animes(message: types.Message):
         await message.answer(text, parse_mode="Markdown")
 
 
-# 📊 Statistika
+# === Statistika ===
 @dp.message_handler(lambda m: m.text == "📊 Statistika")
 async def stats(message: types.Message):
+    from database import db_pool
+    async with db_pool.acquire() as conn:
+        start = time.perf_counter()
+        await conn.fetch("SELECT 1;")
+        ping = (time.perf_counter() - start) * 1000
     kodlar = await get_all_codes()
     foydalanuvchilar = await get_user_count()
-    await message.answer(f"📦 Kodlar: {len(kodlar)}\n👥 Foydalanuvchilar: {foydalanuvchilar}")
+    today_users = await get_today_users()
+    text = (
+        f"💡 O'rtacha yuklanish: {ping:.2f} ms\n\n"
+        f"👥 Foydalanuvchilar: {foydalanuvchilar} ta\n\n"
+        f"📂 Barcha yuklangan animelar: {len(kodlar)} ta\n\n"
+        f"📅 Bugun qo'shilgan foydalanuvchilar: {today_users} ta"
+    )
+    await message.answer(text, reply_markup=admin_keyboard())
 
 
 # === Orqaga tugmasi ===
