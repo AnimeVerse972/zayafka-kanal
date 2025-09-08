@@ -475,6 +475,7 @@ async def ask_stat_code(message: types.Message):
     await AdminStates.waiting_for_stat_code.set()
     await message.answer("📥 Kod raqamini yuboring:", reply_markup=control_keyboard())
 
+
 @dp.message_handler(state=AdminStates.waiting_for_stat_code)
 async def show_code_stat(message: types.Message, state: FSMContext):
     if message.text == "📡 Boshqarish":
@@ -482,23 +483,27 @@ async def show_code_stat(message: types.Message, state: FSMContext):
         await send_admin_panel(message)
         return
 
-    await state.finish()
     code = message.text.strip()
     if not code:
         await message.answer("❗ Kod yuboring.", reply_markup=control_keyboard())
         return
+
     stat = await get_code_stat(code)
+    await state.finish()  # faqat oxirida tugatamiz
+
     if not stat:
         await message.answer("❗ Bunday kod statistikasi topilmadi.", reply_markup=control_keyboard())
+        await send_admin_panel(message)
         return
 
     await message.answer(
         f"📊 <b>{code} statistikasi:</b>\n"
-        f"🔍 Qidirilgan: <b>{stat['searched']}</b>\n"
-        f"👁 Ko‘rilgan: <b>{stat['viewed']}</b>",
-        parse_mode="HTML",
-        reply_markup=control_keyboard()
+        f"🔍 Qidirilgan: <b>{stat['searched']}</b>\n",
+        parse_mode="HTML"
     )
+
+    # Statistikani ko‘rsatib bo‘lgach, admin panel qaytadi
+    await send_admin_panel(message)
 
 
 # === Kodni tahrirlash ===
@@ -582,9 +587,10 @@ async def start_post_process(message: types.Message):
     await PostStates.waiting_for_image.set()
     await message.answer("🖼 Iltimos, post uchun rasm yoki video yuboring (video 60 sekunddan oshmasin).", reply_markup=control_keyboard())
 
+
 @dp.message_handler(content_types=[types.ContentType.PHOTO, types.ContentType.VIDEO], state=PostStates.waiting_for_image)
 async def get_post_image_or_video(message: types.Message, state: FSMContext):
-    if message.content_type == "text" and message.text == "📡 Boshqarish":
+    if message.text == "📡 Boshqarish":
         await state.finish()
         await send_admin_panel(message)
         return
@@ -603,6 +609,7 @@ async def get_post_image_or_video(message: types.Message, state: FSMContext):
     await PostStates.waiting_for_title.set()
     await message.answer("📌 Endi rasm/video ostiga yoziladigan nomni yuboring.", reply_markup=control_keyboard())
 
+
 @dp.message_handler(state=PostStates.waiting_for_title)
 async def get_post_title(message: types.Message, state: FSMContext):
     if message.text == "📡 Boshqarish":
@@ -614,6 +621,7 @@ async def get_post_title(message: types.Message, state: FSMContext):
     await PostStates.waiting_for_link.set()
     await message.answer("🔗 Yuklab olish uchun havolani yuboring.", reply_markup=control_keyboard())
 
+
 @dp.message_handler(state=PostStates.waiting_for_link)
 async def get_post_link(message: types.Message, state: FSMContext):
     if message.text == "📡 Boshqarish":
@@ -621,7 +629,21 @@ async def get_post_link(message: types.Message, state: FSMContext):
         await send_admin_panel(message)
         return
 
+    await state.update_data(link=message.text.strip())
+    await PostStates.waiting_for_button_text.set()
+    await message.answer("✍️ Tugma uchun nom yuboring (masalan: 👉 Yuklab olish).", reply_markup=control_keyboard())
+
+
+@dp.message_handler(state=PostStates.waiting_for_button_text)
+async def get_post_button_text(message: types.Message, state: FSMContext):
+    if message.text == "📡 Boshqarish":
+        await state.finish()
+        await send_admin_panel(message)
+        return
+
+    await state.update_data(button_text=message.text.strip())
     data = await state.get_data()
+
     media = data.get("media")
     if not media:
         await message.answer("❗ Media topilmadi.", reply_markup=control_keyboard())
@@ -630,9 +652,10 @@ async def get_post_link(message: types.Message, state: FSMContext):
 
     media_type, file_id = media
     title = data.get("title")
-    link = message.text.strip()
+    link = data.get("link")
+    button_text = data.get("button_text")
 
-    button = InlineKeyboardMarkup().add(InlineKeyboardButton("✨Yuklab olish✨", url=link))
+    button = InlineKeyboardMarkup().add(InlineKeyboardButton(button_text, url=link))
 
     try:
         if media_type == "photo":
@@ -644,7 +667,6 @@ async def get_post_link(message: types.Message, state: FSMContext):
         await message.answer(f"❌ Xatolik: {e}", reply_markup=admin_keyboard())
     finally:
         await state.finish()
-
 
 # === Anime qo'shish ===
 @dp.message_handler(lambda m: m.text == "➕ Anime qo‘shish", user_id=ADMINS)
@@ -867,7 +889,7 @@ async def send_reklama_post(user_id, code):
 
     # Endi faqat bitta tugma bo'ladi: "✨Yuklab olish"
     keyboard = InlineKeyboardMarkup().add(
-        InlineKeyboardButton("✨ Yuklab olish", callback_data=f"download:{code}")
+        InlineKeyboardButton("✨Tomosha qilish✨", callback_data=f"download:{code}")
     )
 
     try:
@@ -893,7 +915,7 @@ async def download_all(callback: types.CallbackQuery):
     for i in range(post_count):
         try:
             await bot.copy_message(callback.from_user.id, channel, base_id + i)
-            await asyncio.sleep(0.5)  # flood control uchun sekin yuborish
+            await asyncio.sleep(0.1)  # flood control uchun sekin yuborish
         except:
             pass
 
