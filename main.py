@@ -92,6 +92,7 @@ class PostStates(StatesGroup):
     waiting_for_image = State()
     waiting_for_title = State()
     waiting_for_link = State()
+    waiting_for_button_text = State() 
     
 class KanalStates(StatesGroup):
     waiting_for_channel_id = State()
