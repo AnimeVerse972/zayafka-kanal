@@ -851,9 +851,9 @@ async def send_forward_only(message: types.Message, state: FSMContext):
             print(f"Xatolik {user_id} uchun: {e}")
             fail += 1
 
-        # Har 27 ta yuborilganda 1 sekund kutish
-        if index % 27 == 0:
-            await asyncio.sleep(1)
+        # Har 20 ta yuborilganda 1 sekund kutish
+        if index % 20 == 0:
+            await asyncio.sleep(1.5)
 
     # Shu yerda state tugatiladi
     await state.finish()
