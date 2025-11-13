@@ -4,6 +4,7 @@ import io
 import os
 import asyncio
 import time
+import logging
 from datetime import datetime, date
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types
@@ -830,7 +831,7 @@ async def send_broadcast_with_retry(user_id: int, channel_username: str, msg_id:
         except Exception as e:
             error_msg = str(e).lower()
             if "blocked" in error_msg or "user is deactivated" in error_msg or "chat not found" in error_msg:
-                logging.info(f"User {user_id} blocked bot or deleted account")
+                logging.info(f"[SKIP] User {user_id} blocked bot or deleted account")
                 return False
             elif attempt < max_retries - 1:
                 await asyncio.sleep(2 ** attempt)
