@@ -811,56 +811,129 @@ async def back_to_qollanma(callback: types.CallbackQuery):
 
 
 # === Habar yuborish ===
-@dp.message_handler(lambda m: m.text == "📢 Habar yuborish", user_id=ADMINS)
+@dp.message_handler(Text(equals="📢 Habar yuborish"), user_id=ADMINS)
 async def ask_broadcast_info(message: types.Message):
     await AdminStates.waiting_for_broadcast_data.set()
     await message.answer(
-        "📨 Habar yuborish uchun format:\n`@kanal xabar_id`",
+        "📨 Habar yuborish uchun format:\n`@kanal xabar_id`\n\n"
+        "Masalan: `@mychannel 123`",
         parse_mode="Markdown",
         reply_markup=control_keyboard()
     )
 
+async def send_broadcast_with_retry(user_id: int, channel_username: str, msg_id: int, max_retries: int = 3):
+    for attempt in range(max_retries):
+        try:
+            await bot.forward_message(user_id, channel_username, msg_id)
+            return True
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "blocked" in error_msg or "user is deactivated" in error_msg or "chat not found" in error_msg:
+                logging.info(f"User {user_id} blocked bot or deleted account")
+                return False
+            elif attempt < max_retries - 1:
+                await asyncio.sleep(2 ** attempt)
+            else:
+                logging.error(f"Failed to send to {user_id} after {max_retries} attempts: {e}")
+                return False
+    return False
 
 @dp.message_handler(state=AdminStates.waiting_for_broadcast_data)
 async def send_forward_only(message: types.Message, state: FSMContext):
     if message.text == "📡 Boshqarish":
         await state.finish()
-        await send_admin_panel(message)
+        await message.answer("🏠 Bosh menyu", reply_markup=admin_keyboard())
         return
 
     parts = message.text.strip().split()
     if len(parts) != 2:
-        await message.answer("❗ Format noto‘g‘ri. Masalan: `@kanalim 123`", reply_markup=control_keyboard())
+        await message.answer(
+            "❗ Format noto'g'ri. Masalan: `@kanalim 123`",
+            parse_mode="Markdown",
+            reply_markup=control_keyboard()
+        )
         return
 
     channel_username, msg_id = parts
     if not msg_id.isdigit():
-        await message.answer("❗ Xabar ID raqam bo‘lishi kerak.", reply_markup=control_keyboard())
+        await message.answer(
+            "❗ Xabar ID raqam bo'lishi kerak.",
+            reply_markup=control_keyboard()
+        )
         return
 
     msg_id = int(msg_id)
+    
+    try:
+        await bot.forward_message(message.from_user.id, channel_username, msg_id)
+    except Exception as e:
+        await message.answer(
+            f"❌ Kanal yoki xabar topilmadi:\n{e}",
+            reply_markup=control_keyboard()
+        )
+        return
+
     users = await get_all_user_ids()
+    total_users = len(users)
+    
+    await state.finish()
+    
+    if total_users == 0:
+        await message.answer(
+            "❌ Foydalanuvchilar topilmadi!\n\n"
+            "Botni ishlatuvchi foydalanuvchilar yo'q.",
+            reply_markup=admin_keyboard()
+        )
+        return
+    
+    status_msg = await message.answer(
+        f"📤 Yuborilmoqda...\n\n"
+        f"👥 Jami: {total_users}\n"
+        f"✅ Yuborildi: 0\n"
+        f"❌ Xatolik: 0\n"
+        f"⏳ Kutilmoqda: {total_users}",
+        reply_markup=admin_keyboard()
+    )
+    
     success = 0
     fail = 0
-
+    batch_size = 25
+    delay_between_batches = 4.0
+    
     for index, user_id in enumerate(users, start=1):
-        try:
-            await bot.forward_message(user_id, channel_username, msg_id)
+        if user_id == message.from_user.id:
+            continue
+        
+        result = await send_broadcast_with_retry(user_id, channel_username, msg_id)
+        
+        if result:
             success += 1
-        except Exception as e:
-            print(f"Xatolik {user_id} uchun: {e}")
+        else:
             fail += 1
-
-        # Har 20 ta yuborilganda 1 sekund kutish
-        if index % 20 == 0:
-            await asyncio.sleep(1.5)
-
-    # Shu yerda state tugatiladi
-    await state.finish()
-
-    await message.answer(
-        f"✅ Yuborildi: {success} ta\n❌ Xatolik: {fail} ta",
-        reply_markup=admin_keyboard()
+        
+        if index % batch_size == 0:
+            await asyncio.sleep(delay_between_batches)
+            
+            if index % 100 == 0:
+                try:
+                    await status_msg.edit_text(
+                        f"📤 Yuborilmoqda...\n\n"
+                        f"👥 Jami: {total_users}\n"
+                        f"✅ Yuborildi: {success}\n"
+                        f"❌ Xatolik: {fail}\n"
+                        f"⏳ Kutilmoqda: {total_users - index}"
+                    )
+                except Exception:
+                    pass
+    
+    success_rate = (success / total_users * 100) if total_users > 0 else 0
+    
+    await status_msg.edit_text(
+        f"✅ Yuborish yakunlandi!\n\n"
+        f"👥 Jami: {total_users}\n"
+        f"✅ Muvaffaqiyatli: {success}\n"
+        f"❌ Xatolik: {fail}\n\n"
+        f"📊 Muvaffaqiyat: {success_rate:.1f}%"
     )
 
 # === Kodni qidirish (raqam) ===
