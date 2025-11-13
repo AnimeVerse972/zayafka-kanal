@@ -1,4 +1,5 @@
 # === IMPORTLAR ===
+from aiogram.dispatcher.filters import Text
 import io
 import os
 import asyncio
