@@ -594,31 +594,33 @@ async def start_post_process(message: types.Message):
         reply_markup=control_keyboard()
     )
 
-
 @dp.message_handler(state=PostStates.waiting_for_code)
 async def send_post_by_code(message: types.Message, state: FSMContext):
-    # ... Boshqaruvga qaytish va kod tekshiruvi qismlari o'zgarishsiz ...
+    
+    # >>> BOSHQA BOSHQARUV TUGMASI UCHUN QISM <<<
     if message.text == "📡 Boshqarish":
         await state.finish()
-        await send_admin_panel(message)
+        await message.answer("🏠 Bosh menyu", reply_markup=admin_keyboard())
         return
 
-    code = message.text.strip()
+    code = message.text.strip() # code hozircha str
+
+    # Kod tekshiruvi (faqat raqam bo'lishi kerak)
     if not code.isdigit():
         await message.answer("❌ Kod faqat raqamlardan iborat bo‘lishi kerak.", reply_markup=control_keyboard())
         return
+        
+    kino = await get_kino_by_code(code) # code hozir str ('14')
 
-    code = int(code)
-    kino = await get_kino_by_code(code)
     if not kino:
         await message.answer("❌ Bunday kod topilmadi.", reply_markup=control_keyboard())
         return
 
-    # >>> YANGI QISM: Botga START tugmasini yaratish
+    # >>> BOTGA START TUGMASINI YARATISH
     download_btn = InlineKeyboardMarkup().add(
         InlineKeyboardButton(
             "✨Yuklab olish✨",
-            url=f"https://t.me/{BOT_USERNAME}?start={code}" # <--- Foydalanuvchini botga START buyrug'i bilan yuboradi
+            url=f"https://t.me/{BOT_USERNAME}?start={code}" # Foydalanuvchini botga START buyrug'i bilan yuboradi
         )
     )
 
@@ -646,12 +648,11 @@ async def send_post_by_code(message: types.Message, state: FSMContext):
             successful += 1
 
         except Exception as e:
-            # Eslatma: Bu yerda RetryAfter istisnolarini ham ushlash tavsiya etiladi
             print(f"Kanalga post yuborishda Xato: {e}")
             failed += 1
             await asyncio.sleep(1) # Agar xato kelsa, bir soniya kutish
 
-    # ... Yakuniy natija qismlari o'zgarishsiz ...
+    # Yakuniy natija
     await message.answer(
         f"📤 *Post yuborildi:*\n\n"
         f"✅ Muvaffaqiyatli: {successful}\n"
