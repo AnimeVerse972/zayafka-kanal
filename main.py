@@ -585,7 +585,7 @@ async def delete_code_handler(message: types.Message, state: FSMContext):
         await message.answer("❌ Kod topilmadi yoki o‘chirib bo‘lmadi.", reply_markup=admin_keyboard())
 
 
-# === ➤ Post qilish (Bazaga mos) ===
+# === ➤ Post qilish ===
 @dp.message_handler(lambda m: m.text == "📤 Post qilish" and m.from_user.id in ADMINS)
 async def start_post_process(message: types.Message):
     await PostStates.waiting_for_code.set()
@@ -597,33 +597,36 @@ async def start_post_process(message: types.Message):
 
 @dp.message_handler(state=PostStates.waiting_for_code)
 async def process_post_code(message: types.Message, state: FSMContext):
-    if message.text == "📡 Boshqarish":
+    text = message.text.strip()
+
+    # 🔙 Boshqarishga qaytish
+    if text == "📡 Boshqarish":
         await state.finish()
         await send_admin_panel(message)
         return
 
-    code = message.text.strip()
-
-    if not code.isdigit():
+    # ❗ Kod tekshiruvi
+    if not text.isdigit():
         await message.answer("❌ KOD faqat raqamlardan iborat bo‘lishi kerak!")
         return
 
-    # === Bazadan kod bo‘yicha ma'lumot olish ===
+    code = text
+
+    # === Bazadan ma'lumot olish ===
     kino = await get_kino_by_code(code)
 
     if not kino:
-        await message.answer("❌ Bunday KOD topilmadi!")
+        await message.answer("❌ Bu KOD bo‘yicha hech narsa topilmadi.")
         return
 
-    # kino tarkibida:
-    # kino['server_channel']
-    # kino['reklama_id']
-    # kino['title']
-
     server_channel = kino['server_channel']
-    reklama_id = kino['reklama_id'] - 1   # avval +1 qo‘shilgan edi
+    reklama_id = kino['reklama_id'] - 1   # avval +1 qo‘shilgan edi, shu sabab -1 qilamiz
     title = kino['title']
 
+    successful = 0
+    failed = 0
+
+    # === Yuklab olish tugmasi ===
     download_btn = InlineKeyboardMarkup().add(
         InlineKeyboardButton(
             "✨Yuklab olish✨",
@@ -631,9 +634,7 @@ async def process_post_code(message: types.Message, state: FSMContext):
         )
     )
 
-    successful = 0
-    failed = 0
-
+    # === Kanallarga post yuborish ===
     for ch in MAIN_CHANNELS:
         try:
             await bot.copy_message(
@@ -643,15 +644,16 @@ async def process_post_code(message: types.Message, state: FSMContext):
                 reply_markup=download_btn
             )
             successful += 1
-        except Exception as e:
+        except Exception:
             failed += 1
 
+    # === Yakuniy xabar ===
     await message.answer(
-        f"📤 **Post qilish yakunlandi!**\n\n"
-        f"📄 Anime: *{title}*\n"
+        f"📤 *Post yuborildi!*\n\n"
+        f"🎬 Anime: *{title}*\n"
         f"🔢 Kod: `{code}`\n\n"
-        f"✅ Muvaffaqiyatli: {successful}\n"
-        f"❌ Xatolik: {failed}",
+        f"✅ Yuborilgan kanallar: {successful}\n"
+        f"❌ Xato bo‘lganlar: {failed}",
         parse_mode="Markdown",
         reply_markup=admin_keyboard()
     )
