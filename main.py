@@ -184,6 +184,9 @@ class AdminStates(StatesGroup):
     waiting_for_delete_code = State()
     waiting_for_stat_code = State()
     waiting_for_broadcast_data = State()
+    waiting_for_broadcast_type = State()
+    waiting_for_forward_data = State()
+    waiting_for_simple_message = State()
     waiting_for_admin_id = State()
     waiting_for_broadcast_type = State()
 
