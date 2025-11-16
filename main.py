@@ -851,28 +851,35 @@ async def safe_edit_status(old_msg: types.Message, text: str, reply_markup=None)
 
 
 # ---------------- Helper: forward with retry & error handling ----------------
-async def send_broadcast_with_retry(user_id: int, channel_username: str, msg_id: int, max_retries: int = 3, base_delay: float = 1.0):
-    """
-    Kanal xabarini foydalanuvchiga forward qiladi (retry bilan).
-    - qaytaradi True agar muvaffaqiyatli bo'lsa, aks holda False.
-    - bloklangan/deactivated/chat not found kabi holatlarda darhol False qaytaradi.
-    """
+async def send_broadcast_with_retry(user_id: int, channel_username: str, msg_id: int, max_retries: int = 5):
     for attempt in range(max_retries):
         try:
             await bot.forward_message(user_id, channel_username, msg_id)
             return True
-        except Exception as e:
-            err = str(e).lower()
-            # Tez-tez uchraydigan Telegram xatolari: o‘chirilgan/bloklangan/yo'q
-            if any(x in err for x in ("bot was blocked by the user", "blocked", "user is deactivated", "chat not found", "user is deactivated", "bot was blocked")):
-                logging.info(f"[BROADCAST SKIP] user={user_id} error={e}")
-                return False
-            # Agar limit yoki boshqa vaqtinchalik xato bo'lsa, kutib qayta urin
-            if attempt < max_retries - 1:
-                await asyncio.sleep(base_delay * (2 ** attempt))
-                continue
-            logging.error(f"[BROADCAST FAIL] user={user_id} after {max_retries} attempts: {e}")
+
+        # === ENG MUHIM QISM: FLOODWAIT ===
+        except RetryAfter as e:
+            wait_time = e.timeout
+            logging.warning(f"[FLOOD WAIT] {wait_time}s | user_id={user_id}")
+            await asyncio.sleep(wait_time)
+            continue
+
+        # === Blok/uchirilgan userlar ===
+        except (BotBlocked, ChatNotFound, UserDeactivated):
             return False
+
+        # === Boshqa API xatolar ===
+        except TelegramAPIError as e:
+            logging.error(f"Telegram API Error: {e}")
+            await asyncio.sleep(1)
+            continue
+
+        # === Noma'lum xatolar ===
+        except Exception as e:
+            logging.error(f"Unknown error sending to {user_id}: {e}")
+            await asyncio.sleep(1)
+            continue
+
     return False
 
 # ---------------- Handler: boshlash (savol berish) ----------------
