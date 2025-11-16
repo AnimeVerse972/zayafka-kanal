@@ -91,6 +91,7 @@ class SearchStates(StatesGroup):
     waiting_for_anime_name = State()
 
 class PostStates(StatesGroup):
+    waiting_for_code = State() 
     waiting_for_image = State()
     waiting_for_title = State()
     waiting_for_link = State()
