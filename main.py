@@ -585,7 +585,7 @@ async def delete_code_handler(message: types.Message, state: FSMContext):
         await message.answer("❌ Kod topilmadi yoki o‘chirib bo‘lmadi.", reply_markup=admin_keyboard())
 
 
-# === ➤ Post qilish (bazaga mos) ===
+# === ➤ Post qilish (Bazaga mos) - Yangi, birlashtirilgan kod ===
 @dp.message_handler(lambda m: m.text == "📤 Post qilish" and m.from_user.id in ADMINS)
 async def start_post_process(message: types.Message):
     await PostStates.waiting_for_code.set()
@@ -597,78 +597,61 @@ async def start_post_process(message: types.Message):
 
 @dp.message_handler(state=PostStates.waiting_for_code)
 async def send_post_by_code(message: types.Message, state: FSMContext):
+    # ... Boshqaruvga qaytish va kod tekshiruvi qismlari o'zgarishsiz ...
     if message.text == "📡 Boshqarish":
         await state.finish()
         await send_admin_panel(message)
         return
 
     code = message.text.strip()
-
-    # Kod tekshiruvi
     if not code.isdigit():
         await message.answer("❌ Kod faqat raqamlardan iborat bo‘lishi kerak.", reply_markup=control_keyboard())
         return
 
-    # Kod bo'yicha anime olish
+    code = int(code)
     kino = await get_kino_by_code(code)
     if not kino:
         await message.answer("❌ Bunday kod topilmadi.", reply_markup=control_keyboard())
         return
 
-    # Yuklab olish tugmasi
+    # >>> YANGI QISM: Botga START tugmasini yaratish
     download_btn = InlineKeyboardMarkup().add(
         InlineKeyboardButton(
             "✨Yuklab olish✨",
-            url=f"https://t.me/{BOT_USERNAME}?start={code}"
+            url=f"https://t.me/{BOT_USERNAME}?start={code}" # <--- Foydalanuvchini botga START buyrug'i bilan yuboradi
         )
     )
 
     successful, failed = 0, 0
+    poster_id = kino.get("poster_file_id") # Bazadan olinadi
+    caption = kino.get("caption", "")      # Bazadan olinadi
 
     # Har bir asosiy kanallarga post qilish
     for ch in MAIN_CHANNELS:
         try:
-            poster_id = kino.get("poster_file_id")
-            caption = kino.get("caption", "")
-
-            if not poster_id:
-                await bot.send_message(ch, caption or "❗ Ma'lumot mavjud emas", reply_markup=download_btn)
-                successful += 1
-                continue
-
-            # Photo bo'lsa
-            if poster_id.startswith("AgAC") or poster_id.startswith("AgAD"):
-                await bot.send_photo(
-                    ch,
-                    poster_id,
-                    caption=caption,
-                    reply_markup=download_btn
-                )
-
-            # Video bo'lsa
-            elif poster_id.startswith("BAAC"):
-                await bot.send_video(
-                    ch,
-                    poster_id,
-                    caption=caption,
-                    reply_markup=download_btn
-                )
-
-            # Document bo'lsa
+            # Fayl yuborish (Poster ID mavjud bo'lsa)
+            if poster_id and poster_id != "TEXT_ONLY":
+                # Fayl turini ID prefixlari orqali yoki universal funksiya bilan aniqlash
+                if poster_id.startswith(("AgAC", "AgAD")):
+                    await bot.send_photo(ch, poster_id, caption=caption, reply_markup=download_btn)
+                elif poster_id.startswith("BAAC"):
+                    await bot.send_video(ch, poster_id, caption=caption, reply_markup=download_btn)
+                else:
+                    await bot.send_document(ch, poster_id, caption=caption, reply_markup=download_btn)
+            
+            # Faqat Matn yuborish (Poster ID yo'q yoki "TEXT_ONLY" bo'lsa)
             else:
-                await bot.send_document(
-                    ch,
-                    poster_id,
-                    caption=caption,
-                    reply_markup=download_btn
-                )
+                await bot.send_message(ch, caption or "❗ Ma'lumot mavjud emas", reply_markup=download_btn)
 
             successful += 1
 
         except Exception as e:
-            print(f"Xato: {e}")
+            # Eslatma: Bu yerda RetryAfter istisnolarini ham ushlash tavsiya etiladi
+            print(f"Kanalga post yuborishda Xato: {e}")
             failed += 1
+            await asyncio.sleep(1) # Agar xato kelsa, bir soniya kutish
 
+    # ... Yakuniy natija qismlari o'zgarishsiz ...
     await message.answer(
         f"📤 *Post yuborildi:*\n\n"
         f"✅ Muvaffaqiyatli: {successful}\n"
