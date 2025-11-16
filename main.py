@@ -585,7 +585,7 @@ async def delete_code_handler(message: types.Message, state: FSMContext):
         await message.answer("❌ Kod topilmadi yoki o‘chirib bo‘lmadi.", reply_markup=admin_keyboard())
 
 
-# === ➤ Post qilish (Bazaga mos) - Yangi, birlashtirilgan kod ===
+# === ➤ Post qilish (Bazaga mos) ===
 @dp.message_handler(lambda m: m.text == "📤 Post qilish" and m.from_user.id in ADMINS)
 async def start_post_process(message: types.Message):
     await PostStates.waiting_for_code.set()
@@ -594,67 +594,62 @@ async def start_post_process(message: types.Message):
         reply_markup=control_keyboard()
     )
 
+
 @dp.message_handler(state=PostStates.waiting_for_code)
-async def send_post_by_code(message: types.Message, state: FSMContext):
-    
-    # >>> BOSHQA BOSHQARUV TUGMASI UCHUN QISM <<<
+async def process_post_code(message: types.Message, state: FSMContext):
     if message.text == "📡 Boshqarish":
         await state.finish()
-        await message.answer("🏠 Bosh menyu", reply_markup=admin_keyboard())
+        await send_admin_panel(message)
         return
 
-    code = message.text.strip() # code hozircha str
+    code = message.text.strip()
 
-    # Kod tekshiruvi (faqat raqam bo'lishi kerak)
     if not code.isdigit():
-        await message.answer("❌ Kod faqat raqamlardan iborat bo‘lishi kerak.", reply_markup=control_keyboard())
+        await message.answer("❌ KOD faqat raqamlardan iborat bo‘lishi kerak!")
         return
-        
-    kino = await get_kino_by_code(code) # code hozir str ('14')
+
+    # === Bazadan kod bo‘yicha ma'lumot olish ===
+    kino = await get_kino_by_code(code)
 
     if not kino:
-        await message.answer("❌ Bunday kod topilmadi.", reply_markup=control_keyboard())
+        await message.answer("❌ Bunday KOD topilmadi!")
         return
 
-    # >>> BOTGA START TUGMASINI YARATISH
+    # kino tarkibida:
+    # kino['server_channel']
+    # kino['reklama_id']
+    # kino['title']
+
+    server_channel = kino['server_channel']
+    reklama_id = kino['reklama_id'] - 1   # avval +1 qo‘shilgan edi
+    title = kino['title']
+
     download_btn = InlineKeyboardMarkup().add(
         InlineKeyboardButton(
             "✨Yuklab olish✨",
-            url=f"https://t.me/{BOT_USERNAME}?start={code}" # Foydalanuvchini botga START buyrug'i bilan yuboradi
+            url=f"https://t.me/{BOT_USERNAME}?start={code}"
         )
     )
 
-    successful, failed = 0, 0
-    poster_id = kino.get("poster_file_id") # Bazadan olinadi
-    caption = kino.get("caption", "")      # Bazadan olinadi
+    successful = 0
+    failed = 0
 
-    # Har bir asosiy kanallarga post qilish
     for ch in MAIN_CHANNELS:
         try:
-            # Fayl yuborish (Poster ID mavjud bo'lsa)
-            if poster_id and poster_id != "TEXT_ONLY":
-                # Fayl turini ID prefixlari orqali yoki universal funksiya bilan aniqlash
-                if poster_id.startswith(("AgAC", "AgAD")):
-                    await bot.send_photo(ch, poster_id, caption=caption, reply_markup=download_btn)
-                elif poster_id.startswith("BAAC"):
-                    await bot.send_video(ch, poster_id, caption=caption, reply_markup=download_btn)
-                else:
-                    await bot.send_document(ch, poster_id, caption=caption, reply_markup=download_btn)
-            
-            # Faqat Matn yuborish (Poster ID yo'q yoki "TEXT_ONLY" bo'lsa)
-            else:
-                await bot.send_message(ch, caption or "❗ Ma'lumot mavjud emas", reply_markup=download_btn)
-
+            await bot.copy_message(
+                chat_id=ch,
+                from_chat_id=server_channel,
+                message_id=reklama_id,
+                reply_markup=download_btn
+            )
             successful += 1
-
         except Exception as e:
-            print(f"Kanalga post yuborishda Xato: {e}")
             failed += 1
-            await asyncio.sleep(1) # Agar xato kelsa, bir soniya kutish
 
-    # Yakuniy natija
     await message.answer(
-        f"📤 *Post yuborildi:*\n\n"
+        f"📤 **Post qilish yakunlandi!**\n\n"
+        f"📄 Anime: *{title}*\n"
+        f"🔢 Kod: `{code}`\n\n"
         f"✅ Muvaffaqiyatli: {successful}\n"
         f"❌ Xatolik: {failed}",
         parse_mode="Markdown",
@@ -662,6 +657,7 @@ async def send_post_by_code(message: types.Message, state: FSMContext):
     )
 
     await state.finish()
+
     
 # === Anime qo'shish ===
 @dp.message_handler(lambda m: m.text == "➕ Anime qo‘shish", user_id=ADMINS)
