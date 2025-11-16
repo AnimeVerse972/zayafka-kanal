@@ -68,6 +68,116 @@ def control_keyboard():
 async def send_admin_panel(message: types.Message):
     await message.answer("👮‍♂️ Admin panel:", reply_markup=admin_keyboard())
 
+async def background_broadcast(message: types.Message, users: list, broadcast_info: dict):
+    """
+    Flood control bilan himoyalangan xabar yuborish:
+    - Agar 'Flood control exceeded' chiqsa, kutib keyin davom etadi.
+    - Progress adminga yuboriladi.
+    """
+    success = 0
+    fail = 0
+    total_users = len(users)
+
+    BATCH_SIZE = 15  # Har batchda 15 userga yuboriladi
+    BATCH_DELAY = 2  # batchdan keyin 2s kutish
+    PER_USER_DELAY = 0.1  # har userdan keyin kichik delay
+
+    admin_id = message.chat.id
+
+    # Habar yuborish funksiyasini aniqlash
+    if broadcast_info.get('type') == 'forward':
+        channel_username = broadcast_info['channel_username']
+        msg_id = broadcast_info['msg_id']
+
+        async def send_func(user_id):
+            retries = 0
+            while retries < 5:
+                try:
+                    await bot.forward_message(user_id, channel_username, msg_id)
+                    return True
+                except Exception as e:
+                    if "flood control" in str(e).lower():
+                        wait_time = int(str(e).split("Retry in ")[-1].split(" ")[0])
+                        await asyncio.sleep(wait_time + 1)
+                        retries += 1
+                    else:
+                        return False
+            return False
+    else:  # Oddiy xabar
+        async def send_func(user_id):
+            retries = 0
+            while retries < 5:
+                try:
+                    await bot.copy_message(user_id, admin_id, broadcast_info['message_id'])
+                    return True
+                except Exception as e:
+                    if "flood control" in str(e).lower():
+                        wait_time = int(str(e).split("Retry in ")[-1].split(" ")[0])
+                        await asyncio.sleep(wait_time + 1)
+                        retries += 1
+                    else:
+                        return False
+            return False
+
+    # Boshlanish haqida adminga habar
+    status_msg = await bot.send_message(
+        admin_id,
+        f"⏳ **Boshlandi!** Jami {total_users} ta foydalanuvchiga yuborish.",
+        parse_mode="Markdown"
+    )
+    for i in range(0, total_users, BATCH_SIZE):
+        batch = users[i:i+BATCH_SIZE]
+        for user_id in batch:
+            if user_id == admin_id:
+                continue
+            ok = await send_func(user_id)
+            if ok:
+                success += 1
+            else:
+                fail += 1
+            await asyncio.sleep(PER_USER_DELAY)
+
+        # batch tugagandan keyin kutish
+        await asyncio.sleep(BATCH_DELAY)
+
+        # Progress yangilash
+        remaining = total_users - (i + len(batch))
+        try:
+            await bot.edit_message_text(
+                chat_id=admin_id,
+                message_id=status_msg.message_id,
+                text=(
+                    f"📤 Yuborilmoqda...\n\n"
+                    f"👥 Jami: {total_users}\n"
+                    f"✅ Yuborildi: {success}\n"
+                    f"❌ Xatolik: {fail}\n"
+                    f"⏳ Kutilmoqda: {remaining}"
+                )
+            )
+        except Exception:
+            pass  # edit_text xatolarini e'tiborsiz qoldirish
+
+
+    # Yakuniy hisobot
+    await bot.edit_message_text(
+        chat_id=admin_id,
+        message_id=status_msg.message_id,
+        text=(
+            f"✅ **Yuborish tugadi!**\n"
+            f"Jami foydalanuvchilar: {total_users}\n"
+            f"Muvaﬀaqiyatli: {success}\n"
+            f"Xato: {fail}"
+        ),
+        reply_markup=admin_keyboard()
+    )
+
+
+def get_broadcast_type_keyboard():
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.row("📰 Oddiy xabar", "📣 Kanaldan yuborish")
+    keyboard.add("📡 Boshqarish") # Orqaga qaytish
+    return keyboard
+
 # === HOLATLAR ===
 class AdminStates(StatesGroup):
     waiting_for_kino_data = State()
@@ -75,6 +185,7 @@ class AdminStates(StatesGroup):
     waiting_for_stat_code = State()
     waiting_for_broadcast_data = State()
     waiting_for_admin_id = State()
+    waiting_for_broadcast_type = State()
 
 class AdminReplyStates(StatesGroup):
     waiting_for_reply_message = State()
