@@ -584,93 +584,100 @@ async def delete_code_handler(message: types.Message, state: FSMContext):
         await message.answer("❌ Kod topilmadi yoki o‘chirib bo‘lmadi.", reply_markup=admin_keyboard())
 
 
-# === Post qilish ===
-@dp.message_handler(lambda m: m.text == "📤 Post qilish", user_id=ADMINS)
+# === ➤ Post qilish (bazaga mos) ===
+@dp.message_handler(lambda m: m.text == "📤 Post qilish" and m.from_user.id in ADMINS)
 async def start_post_process(message: types.Message):
-    await PostStates.waiting_for_image.set()
-    await message.answer("🖼 Iltimos, post uchun rasm yoki video yuboring (video 60 sekunddan oshmasin).", reply_markup=control_keyboard())
+    await PostStates.waiting_for_code.set()
+    await message.answer(
+        "🔢 Qaysi anime KODini kanalga yubormoqchisiz?\nMasalan: `147`",
+        reply_markup=control_keyboard()
+    )
 
 
-@dp.message_handler(content_types=[types.ContentType.PHOTO, types.ContentType.VIDEO], state=PostStates.waiting_for_image)
-async def get_post_image_or_video(message: types.Message, state: FSMContext):
+@dp.message_handler(state=PostStates.waiting_for_code)
+async def send_post_by_code(message: types.Message, state: FSMContext):
     if message.text == "📡 Boshqarish":
         await state.finish()
         await send_admin_panel(message)
         return
 
-    if message.content_type == "photo":
-        file_id = message.photo[-1].file_id
-        await state.update_data(media=("photo", file_id))
-    elif message.content_type == "video":
-        duration = getattr(message.video, "duration", 0)
-        if duration > 60:
-            await message.answer("❌ Video 60 sekunddan oshmasligi kerak. Qaytadan yuboring.", reply_markup=control_keyboard())
-            return
-        file_id = message.video.file_id
-        await state.update_data(media=("video", file_id))
+    code = message.text.strip()
 
-    await PostStates.waiting_for_title.set()
-    await message.answer("📌 Endi rasm/video ostiga yoziladigan nomni yuboring.", reply_markup=control_keyboard())
-
-
-@dp.message_handler(state=PostStates.waiting_for_title)
-async def get_post_title(message: types.Message, state: FSMContext):
-    if message.text == "📡 Boshqarish":
-        await state.finish()
-        await send_admin_panel(message)
+    # Kod tekshiruvi
+    if not code.isdigit():
+        await message.answer("❌ Kod faqat raqamlardan iborat bo‘lishi kerak.", reply_markup=control_keyboard())
         return
 
-    await state.update_data(title=message.text.strip())
-    await PostStates.waiting_for_link.set()
-    await message.answer("🔗 Yuklab olish uchun havolani yuboring.", reply_markup=control_keyboard())
-
-
-@dp.message_handler(state=PostStates.waiting_for_link)
-async def get_post_link(message: types.Message, state: FSMContext):
-    if message.text == "📡 Boshqarish":
-        await state.finish()
-        await send_admin_panel(message)
+    # Kod bo'yicha anime olish
+    kino = await get_kino_by_code(code)
+    if not kino:
+        await message.answer("❌ Bunday kod topilmadi.", reply_markup=control_keyboard())
         return
 
-    await state.update_data(link=message.text.strip())
-    await PostStates.waiting_for_button_text.set()
-    await message.answer("✍️ Tugma uchun nom yuboring (masalan: 👉 Yuklab olish).", reply_markup=control_keyboard())
+    # Yuklab olish tugmasi
+    download_btn = InlineKeyboardMarkup().add(
+        InlineKeyboardButton(
+            "✨Yuklab olish✨",
+            url=f"https://t.me/{BOT_USERNAME}?start={code}"
+        )
+    )
 
+    successful, failed = 0, 0
 
-@dp.message_handler(state=PostStates.waiting_for_button_text)
-async def get_post_button_text(message: types.Message, state: FSMContext):
-    if message.text == "📡 Boshqarish":
-        await state.finish()
-        await send_admin_panel(message)
-        return
+    # Har bir asosiy kanallarga post qilish
+    for ch in MAIN_CHANNELS:
+        try:
+            poster_id = kino.get("poster_file_id")
+            caption = kino.get("caption", "")
 
-    await state.update_data(button_text=message.text.strip())
-    data = await state.get_data()
+            if not poster_id:
+                await bot.send_message(ch, caption or "❗ Ma'lumot mavjud emas", reply_markup=download_btn)
+                successful += 1
+                continue
 
-    media = data.get("media")
-    if not media:
-        await message.answer("❗ Media topilmadi.", reply_markup=control_keyboard())
-        await PostStates.waiting_for_image.set()
-        return
+            # Photo bo'lsa
+            if poster_id.startswith("AgAC") or poster_id.startswith("AgAD"):
+                await bot.send_photo(
+                    ch,
+                    poster_id,
+                    caption=caption,
+                    reply_markup=download_btn
+                )
 
-    media_type, file_id = media
-    title = data.get("title")
-    link = data.get("link")
-    button_text = data.get("button_text")
+            # Video bo'lsa
+            elif poster_id.startswith("BAAC"):
+                await bot.send_video(
+                    ch,
+                    poster_id,
+                    caption=caption,
+                    reply_markup=download_btn
+                )
 
-    button = InlineKeyboardMarkup().add(InlineKeyboardButton(button_text, url=link))
+            # Document bo'lsa
+            else:
+                await bot.send_document(
+                    ch,
+                    poster_id,
+                    caption=caption,
+                    reply_markup=download_btn
+                )
 
-    try:
-        if media_type == "photo":
-            await bot.send_photo(message.chat.id, file_id, caption=title, reply_markup=button)
-        elif media_type == "video":
-            await bot.send_video(message.chat.id, file_id, caption=title, reply_markup=button)
-        await message.answer("✅ Post muvaffaqiyatli yuborildi.", reply_markup=admin_keyboard())
-    except Exception as e:
-        await message.answer(f"❌ Xatolik: {e}", reply_markup=admin_keyboard())
-    finally:
-        await state.finish()
+            successful += 1
 
+        except Exception as e:
+            print(f"Xato: {e}")
+            failed += 1
+
+    await message.answer(
+        f"📤 *Post yuborildi:*\n\n"
+        f"✅ Muvaffaqiyatli: {successful}\n"
+        f"❌ Xatolik: {failed}",
+        parse_mode="Markdown",
+        reply_markup=admin_keyboard()
+    )
+
+    await state.finish()
+    
 # === Anime qo'shish ===
 @dp.message_handler(lambda m: m.text == "➕ Anime qo‘shish", user_id=ADMINS)
 async def add_start(message: types.Message):
