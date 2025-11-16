@@ -585,7 +585,6 @@ async def delete_code_handler(message: types.Message, state: FSMContext):
         await message.answer("❌ Kod topilmadi yoki o‘chirib bo‘lmadi.", reply_markup=admin_keyboard())
 
 
-# === ➤ Post qilish ===
 @dp.message_handler(lambda m: m.text == "📤 Post qilish" and m.from_user.id in ADMINS)
 async def start_post_process(message: types.Message):
     await PostStates.waiting_for_code.set()
@@ -599,34 +598,29 @@ async def start_post_process(message: types.Message):
 async def process_post_code(message: types.Message, state: FSMContext):
     text = message.text.strip()
 
-    # 🔙 Boshqarishga qaytish
+    # Admin panelga qaytish
     if text == "📡 Boshqarish":
         await state.finish()
         await send_admin_panel(message)
         return
 
-    # ❗ Kod tekshiruvi
     if not text.isdigit():
-        await message.answer("❌ KOD faqat raqamlardan iborat bo‘lishi kerak!")
+        await message.answer("❌ Kod faqat raqam bo‘lishi kerak!")
         return
 
     code = text
 
-    # === Bazadan ma'lumot olish ===
+    # === BAZADAN ANIQLASH ===
     kino = await get_kino_by_code(code)
 
     if not kino:
-        await message.answer("❌ Bu KOD bo‘yicha hech narsa topilmadi.")
+        await message.answer("❌ Bunday kod topilmadi!")
         return
 
-    server_channel = kino['server_channel']
-    reklama_id = kino['reklama_id'] - 1   # avval +1 qo‘shilgan edi, shu sabab -1 qilamiz
-    title = kino['title']
+    channel = kino["channel"]            # server channel
+    message_id = kino["message_id"] - 1  # avval +1 qilingan, endi -1 qilib olib qo‘yamiz
+    title = kino["title"]
 
-    successful = 0
-    failed = 0
-
-    # === Yuklab olish tugmasi ===
     download_btn = InlineKeyboardMarkup().add(
         InlineKeyboardButton(
             "✨Yuklab olish✨",
@@ -634,32 +628,34 @@ async def process_post_code(message: types.Message, state: FSMContext):
         )
     )
 
-    # === Kanallarga post yuborish ===
+    successful = 0
+    failed = 0
+
+    # === KANALLARGA YUBORISH ===
     for ch in MAIN_CHANNELS:
         try:
             await bot.copy_message(
                 chat_id=ch,
-                from_chat_id=server_channel,
-                message_id=reklama_id,
+                from_chat_id=channel,
+                message_id=message_id,
                 reply_markup=download_btn
             )
             successful += 1
-        except Exception:
+        except:
             failed += 1
 
-    # === Yakuniy xabar ===
+    # Yakuniy javob
     await message.answer(
         f"📤 *Post yuborildi!*\n\n"
         f"🎬 Anime: *{title}*\n"
         f"🔢 Kod: `{code}`\n\n"
-        f"✅ Yuborilgan kanallar: {successful}\n"
-        f"❌ Xato bo‘lganlar: {failed}",
+        f"✅ Yuborildi: {successful}\n"
+        f"❌ Xato: {failed}",
         parse_mode="Markdown",
         reply_markup=admin_keyboard()
     )
 
     await state.finish()
-
     
 # === Anime qo'shish ===
 @dp.message_handler(lambda m: m.text == "➕ Anime qo‘shish", user_id=ADMINS)
