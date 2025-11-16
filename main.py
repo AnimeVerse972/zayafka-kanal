@@ -796,143 +796,101 @@ async def back_to_qollanma(callback: types.CallbackQuery):
         await callback.message.delete()
     finally:
         await callback.answer()
-# ---------------- Klaviaturalarni bir martalik yaratish ----------------
-ADMIN_KB = admin_keyboard()
-CONTROL_KB = control_keyboard()
 
-# --------- Safe edit helper ---------
-async def safe_edit_status(old_msg: types.Message, text: str, reply_markup=None):
-    try:
-        return await old_msg.edit_text(text, reply_markup=reply_markup)
-    except Exception as e:
-        logging.warning(f"Status yangilanmadi: {e}")
-        return old_msg
-
-# --------- Send forward with retry ---------
-async def send_broadcast_with_retry(user_id: int, channel_username: str, msg_id: int, max_retries: int = 5):
-    for attempt in range(max_retries):
-        try:
-            await bot.forward_message(user_id, channel_username, msg_id)
-            return True
-        except RetryAfter as e:
-            wait_time = e.timeout
-            logging.warning(f"[FLOOD WAIT] {wait_time}s | user_id={user_id}")
-            await asyncio.sleep(wait_time)
-        except (BotBlocked, ChatNotFound, UserDeactivated):
-            return False
-        except TelegramAPIError as e:
-            logging.error(f"Telegram API Error: {e}")
-            await asyncio.sleep(1)
-        except Exception as e:
-            logging.error(f"Unknown error sending to {user_id}: {e}")
-            await asyncio.sleep(1)
-    return False
-
-# ---------------- Handler: boshlash (savol berish) ----------------
-@dp.message_handler(Text(equals="📢 Habar yuborish"), user_id=ADMINS)
-async def ask_broadcast_info(message: types.Message):
-    await AdminStates.waiting_for_broadcast_data.set()
+@dp.message_handler(lambda m: m.text == "📢 Habar yuborish", user_id=ADMINS)
+async def ask_broadcast_type(message: types.Message):
+    await AdminStates.waiting_for_broadcast_type.set()
     await message.answer(
-        "📨 Habar yuborish uchun format:\n`@kanal xabar_id`\n\nMasalan: `@mychannel 123`",
-        parse_mode="Markdown",
-        reply_markup=CONTROL_KB
+        "Qanday turdagi xabar yubormoqchisiz?",
+        reply_markup=get_broadcast_type_keyboard()
     )
+# 2. Habar turini tanlash
+@dp.message_handler(state=AdminStates.waiting_for_broadcast_type)
+async def process_broadcast_type(message: types.Message):
 
-# ---------------- Handler: yuborish jarayoni ----------------
-@dp.message_handler(state=AdminStates.waiting_for_broadcast_data)
-async def send_forward_only(message: types.Message, state: FSMContext):
+    # MUHIM: Birinchi shart sifatida Boshqarish tugmasini tekshiramiz
+    if message.text == "📡 Boshqarish":
+
+        # 1. FSM holatini tugatamiz
+        await states.finish()
+
+        # 2. Asosiy admin paneliga qaytaramiz
+        await send_admin_panel(message)
+
+        return # Qolgan kod ishlamasin
+
+    elif message.text == "📣 Kanaldan yuborish":
+        await AdminStates.waiting_for_forward_data.set()
+        await message.answer(
+            "📨 **Kanaldan yuborish** uchun format:\n`@kanal_username xabar_id`\n\nMasalan: `@kanalim 123`",
+            parse_mode="Markdown",
+            reply_markup=control_keyboard()
+        )
+
+    elif message.text == "📰 Oddiy xabar":
+        await AdminStates.waiting_for_simple_message.set()
+        await message.answer(
+            "📨 **Oddiy xabar** (rasm, matn, video,...) yuboring.\nBu xabar foydalanuvchilarga `copy_message` orqali yuboriladi.",
+            parse_mode="Markdown",
+            reply_markup=control_keyboard()
+        )
+
+    else:
+        await message.answer("❗ Noto‘g‘ri tanlov.", reply_markup=get_broadcast_type_keyboard())
+
+# 3a. Kanaldan yuborish ma'lumotlarini qabul qilish
+@dp.message_handler(state=AdminStates.waiting_for_forward_data)
+async def start_forward_broadcast(message: types.Message, state: FSMContext):
     if message.text == "📡 Boshqarish":
         await state.finish()
-        await message.answer("🏠 Bosh menyu", reply_markup=ADMIN_KB)
+        await send_admin_panel(message)
         return
 
     parts = message.text.strip().split()
-    if len(parts) != 2 or not parts[1].isdigit():
-        await message.answer(
-            "❗ Format noto'g'ri. Masalan: `@kanalim 123`",
-            parse_mode="Markdown",
-            reply_markup=CONTROL_KB
-        )
+    if len(parts) != 2:
+        await message.answer("❗ Format noto‘g‘ri. Masalan: `@kanalim 123`", reply_markup=control_keyboard())
         return
 
-    channel_username, msg_id = parts
-    msg_id = int(msg_id)
-
-    # Admin uchun test forward
-    try:
-        await bot.forward_message(message.from_user.id, channel_username, msg_id)
-    except Exception as e:
-        await message.answer(
-            f"❌ Kanal yoki xabar topilmadi (test forward muvaffaqiyatsiz):\n{e}",
-            reply_markup=CONTROL_KB
-        )
+    channel_username, msg_id_str = parts
+    if not msg_id_str.isdigit():
+        await message.answer("❗ Xabar ID raqam bo‘lishi kerak.", reply_markup=control_keyboard())
         return
 
-    users = await get_all_user_ids()
-    total_users = len(users)
+    msg_id = int(msg_id_str)
+
+    # State'ni tugatamiz
     await state.finish()
 
-    if total_users == 0:
-        await message.answer("❌ Foydalanuvchilar topilmadi!", reply_markup=ADMIN_KB)
+    # Yuborishni asinxron ravishda boshlaymiz
+    users = await get_all_user_ids()
+    broadcast_info = {
+        'type': 'forward',
+        'channel_username': channel_username,
+        'msg_id': msg_id
+    }
+    asyncio.create_task(background_broadcast(message, users, broadcast_info))
+
+# 3b. Oddiy xabar ma'lumotlarini qabul qilish
+@dp.message_handler(content_types=types.ContentTypes.ANY, state=AdminStates.waiting_for_simple_message)
+async def start_simple_broadcast(message: types.Message, state: FSMContext):
+    if message.text == "📡 Boshqarish":
+        await state.finish()
+        await send_admin_panel(message)
         return
 
-    # Boshlang'ich status xabari
-    status_text = (
-        f"📤 Yuborilmoqda...\n\n"
-        f"👥 Jami: {total_users}\n"
-        f"✅ Yuborildi: 0\n"
-        f"❌ Xatolik: 0\n"
-        f"⏳ Kutilmoqda: {total_users}"
-    )
-    status_msg = await message.answer(status_text, reply_markup=ADMIN_KB)
+    # Text bo'lsa, agar boshqa content turi bo'lmasa, ogohlantiramiz
+    if message.content_type == types.ContentTypes.TEXT and message.text not in ["📡 Boshqarish"]:
+        await message.answer("Siz yuborgan matnli xabar barcha foydalanuvchilarga yuboriladi. Tasdiqlaysizmi?", reply_markup=control_keyboard())
+    await state.finish()
 
-    success = 0
-    fail = 0
-    update_every = 5       # har 5ta foydalanuvchida yangilansin
-    per_user_sleep = 0.05
-    batch_sleep = 1.0
+    # Yuborishni asinxron ravishda boshlaymiz
+    users = await get_all_user_ids()
+    broadcast_info = {
+        'type': 'copy',
+        'message_id': message.message_id
+    }
+    asyncio.create_task(background_broadcast(message, users, broadcast_info))
 
-    processed = 0
-    for user_id in users:
-        if user_id == message.from_user.id:
-            continue
-
-        processed += 1
-        ok = await send_broadcast_with_retry(user_id, channel_username, msg_id)
-
-        if ok:
-            success += 1
-        else:
-            fail += 1
-
-        await asyncio.sleep(per_user_sleep)
-
-        # Status yangilash
-        if processed % update_every == 0 or processed == total_users:
-            remaining = total_users - processed
-            new_text = (
-                f"📤 Yuborilmoqda...\n\n"
-                f"👥 Jami: {total_users}\n"
-                f"✅ Yuborildi: {success}\n"
-                f"❌ Xatolik: {fail}\n"
-                f"⏳ Kutilmoqda: {remaining}"
-            )
-            status_msg = await safe_edit_status(status_msg, new_text, reply_markup=ADMIN_KB)
-            await asyncio.sleep(batch_sleep)
-
-    # Yakuniy natija
-    success_rate = (success / total_users * 100) if total_users else 0
-    final_text = (
-        f"✅ Yuborish yakunlandi!\n\n"
-        f"👥 Jami: {total_users}\n"
-        f"✅ Muvaffaqiyatli: {success}\n"
-        f"❌ Xatolik: {fail}\n\n"
-        f"📊 Muvaffaqiyat: {success_rate:.1f}%"
-    )
-    try:
-        await status_msg.edit_text(final_text, reply_markup=ADMIN_KB)
-    except Exception:
-        pass
 
 # === Kodni qidirish (raqam) ===
 @dp.message_handler(lambda message: message.text.isdigit())
