@@ -796,25 +796,16 @@ async def back_to_qollanma(callback: types.CallbackQuery):
         await callback.message.delete()
     finally:
         await callback.answer()
+# ---------------- Klaviaturalarni bir martalik yaratish ----------------
+ADMIN_KB = admin_keyboard()
+CONTROL_KB = control_keyboard()
 
 # --------- Safe edit helper ---------
 async def safe_edit_status(old_msg: types.Message, text: str, reply_markup=None):
-    for attempt in range(3):
-        try:
-            return await old_msg.edit_text(text, reply_markup=reply_markup)
-        except Exception as e:
-            err = str(e).lower()
-            if "message is not modified" in err:
-                return old_msg
-            await asyncio.sleep(1 + attempt)
     try:
-        new_msg = await old_msg.answer(text, reply_markup=reply_markup)
-        try:
-            await old_msg.delete()
-        except Exception:
-            pass
-        return new_msg
-    except Exception:
+        return await old_msg.edit_text(text, reply_markup=reply_markup)
+    except Exception as e:
+        logging.warning(f"Status yangilanmadi: {e}")
         return old_msg
 
 # --------- Send forward with retry ---------
@@ -827,60 +818,54 @@ async def send_broadcast_with_retry(user_id: int, channel_username: str, msg_id:
             wait_time = e.timeout
             logging.warning(f"[FLOOD WAIT] {wait_time}s | user_id={user_id}")
             await asyncio.sleep(wait_time)
-            continue
         except (BotBlocked, ChatNotFound, UserDeactivated):
             return False
         except TelegramAPIError as e:
             logging.error(f"Telegram API Error: {e}")
             await asyncio.sleep(1)
-            continue
         except Exception as e:
             logging.error(f"Unknown error sending to {user_id}: {e}")
             await asyncio.sleep(1)
-            continue
     return False
 
-# --------- Handler: boshlash (savol berish) ---------
+# ---------------- Handler: boshlash (savol berish) ----------------
 @dp.message_handler(Text(equals="📢 Habar yuborish"), user_id=ADMINS)
 async def ask_broadcast_info(message: types.Message):
     await AdminStates.waiting_for_broadcast_data.set()
     await message.answer(
         "📨 Habar yuborish uchun format:\n`@kanal xabar_id`\n\nMasalan: `@mychannel 123`",
         parse_mode="Markdown",
-        reply_markup=control_keyboard()
+        reply_markup=CONTROL_KB
     )
 
-# --------- Handler: yuborish jarayoni ---------
+# ---------------- Handler: yuborish jarayoni ----------------
 @dp.message_handler(state=AdminStates.waiting_for_broadcast_data)
 async def send_forward_only(message: types.Message, state: FSMContext):
-    # Boshqaruvga qaytish tugmasi
     if message.text == "📡 Boshqarish":
         await state.finish()
-        await message.answer("🏠 Bosh menyu", reply_markup=admin_keyboard())
+        await message.answer("🏠 Bosh menyu", reply_markup=ADMIN_KB)
         return
 
     parts = message.text.strip().split()
-    if len(parts) != 2:
+    if len(parts) != 2 or not parts[1].isdigit():
         await message.answer(
             "❗ Format noto'g'ri. Masalan: `@kanalim 123`",
             parse_mode="Markdown",
-            reply_markup=control_keyboard()
+            reply_markup=CONTROL_KB
         )
         return
 
     channel_username, msg_id = parts
-    if not msg_id.isdigit():
-        await message.answer("❗ Xabar ID raqam bo'lishi kerak.", reply_markup=control_keyboard())
-        return
-
     msg_id = int(msg_id)
 
     # Admin uchun test forward
     try:
         await bot.forward_message(message.from_user.id, channel_username, msg_id)
     except Exception as e:
-        await message.answer(f"❌ Kanal yoki xabar topilmadi (test forward muvaffaqiyatsiz):\n{e}",
-                             reply_markup=control_keyboard())
+        await message.answer(
+            f"❌ Kanal yoki xabar topilmadi (test forward muvaffaqiyatsiz):\n{e}",
+            reply_markup=CONTROL_KB
+        )
         return
 
     users = await get_all_user_ids()
@@ -888,7 +873,7 @@ async def send_forward_only(message: types.Message, state: FSMContext):
     await state.finish()
 
     if total_users == 0:
-        await message.answer("❌ Foydalanuvchilar topilmadi!", reply_markup=admin_keyboard())
+        await message.answer("❌ Foydalanuvchilar topilmadi!", reply_markup=ADMIN_KB)
         return
 
     # Boshlang'ich status xabari
@@ -899,7 +884,7 @@ async def send_forward_only(message: types.Message, state: FSMContext):
         f"❌ Xatolik: 0\n"
         f"⏳ Kutilmoqda: {total_users}"
     )
-    status_msg = await message.answer(status_text, reply_markup=admin_keyboard())
+    status_msg = await message.answer(status_text, reply_markup=ADMIN_KB)
 
     success = 0
     fail = 0
@@ -932,7 +917,7 @@ async def send_forward_only(message: types.Message, state: FSMContext):
                 f"❌ Xatolik: {fail}\n"
                 f"⏳ Kutilmoqda: {remaining}"
             )
-            status_msg = await safe_edit_status(status_msg, new_text, reply_markup=admin_keyboard())
+            status_msg = await safe_edit_status(status_msg, new_text, reply_markup=ADMIN_KB)
             await asyncio.sleep(batch_sleep)
 
     # Yakuniy natija
@@ -945,7 +930,7 @@ async def send_forward_only(message: types.Message, state: FSMContext):
         f"📊 Muvaffaqiyat: {success_rate:.1f}%"
     )
     try:
-        await status_msg.edit_text(final_text, reply_markup=admin_keyboard())
+        await status_msg.edit_text(final_text, reply_markup=ADMIN_KB)
     except Exception:
         pass
 
