@@ -818,8 +818,63 @@ async def back_to_qollanma(callback: types.CallbackQuery):
     finally:
         await callback.answer()
 
+#---------habar yubprish helperlar
+async def safe_edit_status(old_msg: types.Message, text: str, reply_markup=None):
+    """
+    Xavfsiz tarzda status xabarini yangilash:
+    - edit_text muvaffaqiyatsiz bo'lsa, yangi message yuboradi va eski xabarni o'chiradi (agar mumkin bo'lsa).
+    - har bir urinishda kichik kechikish qo'yadi.
+    """
+    for attempt in range(3):
+        try:
+            return await old_msg.edit_text(text, reply_markup=reply_markup)
+        except Exception as e:
+            err = str(e).lower()
+            # Agar message juda katta yoki "not modified" bo'lsa, hech qachon qayta urinmaslik
+            if "message is not modified" in err:
+                return old_msg
+            await asyncio.sleep(1 + attempt)  # asta kutish va qayta urinish
 
-# === Habar yuborish ===
+    # Agar 3 marta ham muvaffaqiyatsiz bo'lsa, yangi status xabar yaratamiz
+    try:
+        new_msg = await old_msg.answer(text, reply_markup=reply_markup)
+        # Eski xabarni o'chirishga harakat qilamiz (agar chatga ruxsat bo'lsa)
+        try:
+            await old_msg.delete()
+        except Exception:
+            pass
+        return new_msg
+    except Exception:
+        # Agar yangi xabar ham yuborilmasa — eski xabarni qaytaramiz
+        return old_msg
+
+
+# ---------------- Helper: forward with retry & error handling ----------------
+async def send_broadcast_with_retry(user_id: int, channel_username: str, msg_id: int, max_retries: int = 3, base_delay: float = 1.0):
+    """
+    Kanal xabarini foydalanuvchiga forward qiladi (retry bilan).
+    - qaytaradi True agar muvaffaqiyatli bo'lsa, aks holda False.
+    - bloklangan/deactivated/chat not found kabi holatlarda darhol False qaytaradi.
+    """
+    for attempt in range(max_retries):
+        try:
+            await bot.forward_message(user_id, channel_username, msg_id)
+            return True
+        except Exception as e:
+            err = str(e).lower()
+            # Tez-tez uchraydigan Telegram xatolari: o‘chirilgan/bloklangan/yo'q
+            if any(x in err for x in ("bot was blocked by the user", "blocked", "user is deactivated", "chat not found", "user is deactivated", "bot was blocked")):
+                logging.info(f"[BROADCAST SKIP] user={user_id} error={e}")
+                return False
+            # Agar limit yoki boshqa vaqtinchalik xato bo'lsa, kutib qayta urin
+            if attempt < max_retries - 1:
+                await asyncio.sleep(base_delay * (2 ** attempt))
+                continue
+            logging.error(f"[BROADCAST FAIL] user={user_id} after {max_retries} attempts: {e}")
+            return False
+    return False
+
+# ---------------- Handler: boshlash (savol berish) ----------------
 @dp.message_handler(Text(equals="📢 Habar yuborish"), user_id=ADMINS)
 async def ask_broadcast_info(message: types.Message):
     await AdminStates.waiting_for_broadcast_data.set()
@@ -830,25 +885,11 @@ async def ask_broadcast_info(message: types.Message):
         reply_markup=control_keyboard()
     )
 
-async def send_broadcast_with_retry(user_id: int, channel_username: str, msg_id: int, max_retries: int = 3):
-    for attempt in range(max_retries):
-        try:
-            await bot.forward_message(user_id, channel_username, msg_id)
-            return True
-        except Exception as e:
-            error_msg = str(e).lower()
-            if "blocked" in error_msg or "user is deactivated" in error_msg or "chat not found" in error_msg:
-                logging.info(f"[SKIP] User {user_id} blocked bot or deleted account")
-                return False
-            elif attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
-            else:
-                logging.error(f"Failed to send to {user_id} after {max_retries} attempts: {e}")
-                return False
-    return False
 
+# ---------------- Handler: yuborish jarayoni ----------------
 @dp.message_handler(state=AdminStates.waiting_for_broadcast_data)
 async def send_forward_only(message: types.Message, state: FSMContext):
+    # Boshqaruvga qaytish tugmasi
     if message.text == "📡 Boshqarish":
         await state.finish()
         await message.answer("🏠 Bosh menyu", reply_markup=admin_keyboard())
@@ -872,21 +913,22 @@ async def send_forward_only(message: types.Message, state: FSMContext):
         return
 
     msg_id = int(msg_id)
-    
+
+    # Admin uchun test forward (kanal va xabar to'g'riligini tekshirish)
     try:
         await bot.forward_message(message.from_user.id, channel_username, msg_id)
     except Exception as e:
         await message.answer(
-            f"❌ Kanal yoki xabar topilmadi:\n{e}",
+            f"❌ Kanal yoki xabar topilmadi (test forward muvaffaqiyatsiz):\n{e}",
             reply_markup=control_keyboard()
         )
         return
 
+    # Foydalanuvchilarni olish
     users = await get_all_user_ids()
     total_users = len(users)
-    
     await state.finish()
-    
+
     if total_users == 0:
         await message.answer(
             "❌ Foydalanuvchilar topilmadi!\n\n"
@@ -894,56 +936,67 @@ async def send_forward_only(message: types.Message, state: FSMContext):
             reply_markup=admin_keyboard()
         )
         return
-    
-    status_msg = await message.answer(
+
+    # Boshlang'ich status xabari
+    status_text = (
         f"📤 Yuborilmoqda...\n\n"
         f"👥 Jami: {total_users}\n"
         f"✅ Yuborildi: 0\n"
         f"❌ Xatolik: 0\n"
-        f"⏳ Kutilmoqda: {total_users}",
-        reply_markup=admin_keyboard()
+        f"⏳ Kutilmoqda: {total_users}"
     )
-    
+    status_msg = await message.answer(status_text, reply_markup=admin_keyboard())
+
     success = 0
     fail = 0
-    batch_size = 25
-    delay_between_batches = 4.0
-    
+
+    # Parametrlar: update har qancha foydalanuvchidan keyin ko'rsatish
+    update_every = 20   # har 20 ta foydalanuvchidan keyin status yangilanadi
+    per_user_sleep = 0.06  # har bir yuborish orasidagi kichik pauza
+    batch_sleep = 2.0  # har batch update dan keyingi qo'shimcha uyqu (flood oldini olish)
+
+    # Asosiy loop
+    processed = 0
     for index, user_id in enumerate(users, start=1):
+        # Adminni o'tkazib yuborish (agar ro'yxatda bo'lsa)
         if user_id == message.from_user.id:
             continue
-        
-        result = await send_broadcast_with_retry(user_id, channel_username, msg_id)
-        
-        if result:
+
+        processed += 1
+        ok = await send_broadcast_with_retry(user_id, channel_username, msg_id)
+
+        if ok:
             success += 1
         else:
             fail += 1
-        
-        if index % batch_size == 0:
-            await asyncio.sleep(delay_between_batches)
-            
-            if index % 100 == 0:
-                try:
-                    await status_msg.edit_text(
-                        f"📤 Yuborilmoqda...\n\n"
-                        f"👥 Jami: {total_users}\n"
-                        f"✅ Yuborildi: {success}\n"
-                        f"❌ Xatolik: {fail}\n"
-                        f"⏳ Kutilmoqda: {total_users - index}"
-                    )
-                except Exception:
-                    pass
-    
-    success_rate = (success / total_users * 100) if total_users > 0 else 0
-    
-    await status_msg.edit_text(
+
+        # Har bir foydalanuvchidan so'ng kichik kutish (flood uchun)
+        await asyncio.sleep(per_user_sleep)
+
+        # Status yangilash
+        if processed % update_every == 0 or index == total_users:
+            remaining = total_users - index
+            text = (
+                f"📤 Yuborilmoqda...\n\n"
+                f"👥 Jami: {total_users}\n"
+                f"✅ Yuborildi: {success}\n"
+                f"❌ Xatolik: {fail}\n"
+                f"⏳ Kutilmoqda: {remaining}"
+            )
+            status_msg = await safe_edit_status(status_msg, text, reply_markup=admin_keyboard())
+            # Qo'shimcha kichik pauza batch tugagandan keyin
+            await asyncio.sleep(batch_sleep)
+
+    # Yakuniy natija
+    success_rate = (success / total_users * 100) if total_users > 0 else 0.0
+    final_text = (
         f"✅ Yuborish yakunlandi!\n\n"
         f"👥 Jami: {total_users}\n"
         f"✅ Muvaffaqiyatli: {success}\n"
         f"❌ Xatolik: {fail}\n\n"
         f"📊 Muvaffaqiyat: {success_rate:.1f}%"
     )
+    await safe_edit_status(status_msg, final_text, reply_markup=admin_keyboard())
 
 # === Kodni qidirish (raqam) ===
 @dp.message_handler(lambda message: message.text.isdigit())
